@@ -178,19 +178,13 @@ struct AgendaView: View {
         .accessibilityElement(children: .contain)
     }
 
-    // MARK: Top actions (Join, Open in Calendar, Dismiss) + Open notes
+    // MARK: Top actions: Join, Dismiss, Open notes, Open in Calendar, Start/Stop transcription
 
     @ViewBuilder var actions: some View {
         let item = selected
         VStack(alignment: .leading, spacing: 0) {
             ActionRow(icon: joinIcon(item), title: joinTitle(item), enabled: item?.primaryLink != nil, shortcut: "↩") { joinSelected() }
                 .help(item?.primaryLink == nil ? (item == nil ? "No meeting selected" : AppErrorCode.linkMissing.message) : "Opens the meeting link. You handle the provider's pre-join screen.")
-            ActionRow(icon: "note.text", title: "Open Notes, Transcripts & Summaries", enabled: item != nil, shortcut: "⌘O") {
-                if let item { services.windows.openNotebook(for: item); onClose() }
-            }
-            ActionRow(icon: "calendar", title: openInTitle, enabled: item != nil) {
-                if let item { services.opener.openInCalendar(item.event); onClose() }
-            }
             if let item, item.isDismissed {
                 ActionRow(icon: "arrow.uturn.backward.circle", title: "Undo Dismiss", enabled: true) { Task { await calendar.dismiss(item, false) } }
             } else {
@@ -198,6 +192,12 @@ struct AgendaView: View {
                     if let item { Task { await calendar.dismiss(item, true) } }
                 }
                 .help(AgendaRow.dismissHelp)
+            }
+            ActionRow(icon: "note.text", title: "Open Notes, Transcripts & Summaries", enabled: item != nil, shortcut: "⌘O") {
+                if let item { services.windows.openNotebook(for: item); onClose() }
+            }
+            ActionRow(icon: "calendar", title: openInTitle, enabled: item != nil) {
+                if let item { services.opener.openInCalendar(item.event); onClose() }
             }
             transcriptionAction(item)
         }
@@ -427,6 +427,8 @@ struct AgendaRow: View {
     var body: some View {
         let e = item.event
         let dim = e.rsvp == .declined || item.isDismissed || e.end < now
+        // Meetings that have ended fade back so what is current and upcoming stands out.
+        let past = e.end < now && !active
         HStack(spacing: 8) {
             StatusSymbol(event: e, now: now, active: active)
             Text(timeRange).monospacedDigit().foregroundStyle(dim ? .secondary : .primary)
@@ -436,6 +438,7 @@ struct AgendaRow: View {
             if item.primaryLink == nil && !e.isAllDay { Image(systemName: "link.badge.plus").opacity(0).accessibilityHidden(true) }
             dismissToggle
         }
+        .opacity(past ? (isSelected || hover ? 0.7 : 0.45) : 1)
         .padding(.horizontal, 12)
         .frame(height: AgendaView.rowHeight)
         .background(isSelected ? Color.accentColor.opacity(contrast == .increased ? 0.4 : 0.22) : hover ? Color.primary.opacity(0.06) : .clear,
@@ -495,14 +498,26 @@ struct StatusSymbol: View {
     var event: CalendarOccurrenceSnapshot
     var now: Date
     var active: Bool
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
-        let c = Color(.sRGB, red: event.calendarColor.red, green: event.calendarColor.green, blue: event.calendarColor.blue, opacity: 1)
         Image(systemName: symbol)
-            .foregroundStyle(event.rsvp == .declined ? .secondary : c)
+            .foregroundStyle(event.rsvp == .declined ? AnyShapeStyle(.secondary) : AnyShapeStyle(Self.legible(event.calendarColor, dark: scheme == .dark)))
             .font(.system(size: 12, weight: .semibold))
             .frame(width: 16)
             .accessibilityHidden(true)
     }
+    /// Calendar colours such as bright green are fluorescent on the translucent popover. Keep the hue but cap
+    /// saturation and brightness so the symbol reads as a solid, legible colour (lighter caps in dark mode).
+    static func legible(_ c: RGBAColor, dark: Bool) -> Color {
+        let ns = NSColor(srgbRed: c.red, green: c.green, blue: c.blue, alpha: 1)
+        var h: CGFloat = 0, sat: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        ns.getHue(&h, saturation: &sat, brightness: &b, alpha: &a)
+        let adjusted = dark
+            ? NSColor(hue: h, saturation: min(sat, 0.6), brightness: max(min(b, 0.88), 0.55), alpha: 1)
+            : NSColor(hue: h, saturation: min(sat, 0.8), brightness: min(b, 0.62), alpha: 1)
+        return Color(nsColor: adjusted)
+    }
+
     var symbol: String {
         if active { return "record.circle" }
         if event.isActive(at: now) && event.rsvp != .declined { return "circle.fill" }
