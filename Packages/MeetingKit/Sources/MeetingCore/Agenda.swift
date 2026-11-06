@@ -152,7 +152,9 @@ public enum CountdownFormatter {
         guard let item else { return "" }
         if length == .iconOnly { return "" }
         let title = truncate(item.event.title, to: length.maxTitleCharacters)
-        return "\(title) • \(phrase(for: item, now: now))"
+        // For the first minute after the start time the meeting reads "now" (then "29m left").
+        let sinceStart = now.timeIntervalSince(item.event.start)
+        return "\(title) • \(sinceStart >= 0 && sinceStart < 60 ? "now" : phrase(for: item, now: now))"
     }
 
     /// Next instant at which the minute-level status string may change. Used to schedule a single timer
@@ -161,7 +163,7 @@ public enum CountdownFormatter {
         let nextMinute = Date(timeIntervalSince1970: (floor(now.timeIntervalSince1970 / 60) + 1) * 60)
         var candidate = nextMinute
         for i in items {
-            for t in [i.event.start, i.event.end] where t > now && t < candidate { candidate = t }
+            for t in [i.event.start, i.event.start.addingTimeInterval(60), i.event.end] where t > now && t < candidate { candidate = t }
         }
         return candidate
     }

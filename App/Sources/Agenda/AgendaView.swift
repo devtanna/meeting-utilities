@@ -32,7 +32,8 @@ struct AgendaView: View {
     var selected: AgendaItem? {
         let all = calendar.sections.flatMap(\.items)
         if let selectedID, let s = all.first(where: { $0.id == selectedID }) { return s }
-        return calendar.isToday ? calendar.focusItem(now: services.now) : all.first
+        // Default: the meeting shown in the menu bar, so "Join" joins what the menu bar says.
+        return calendar.isToday ? calendar.joinTarget(now: services.now) : all.first
     }
 
     var body: some View {
@@ -65,7 +66,15 @@ struct AgendaView: View {
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
-        .onAppear { focused = true }
+        .onAppear { focused = true; selectedID = nil }
+        .onDisappear { selectedID = nil }
+        // A clicked meeting is a temporary choice: after 30 s without another click the actions return to the
+        // meeting shown in the menu bar.
+        .task(id: selectedID) {
+            guard selectedID != nil else { return }
+            try? await Task.sleep(for: .seconds(30))
+            if !Task.isCancelled { selectedID = nil }
+        }
         .onKeyPress(.downArrow) { move(1); return .handled }
         .onKeyPress(.upArrow) { move(-1); return .handled }
         .onKeyPress(.return) { joinSelected(); return .handled }
@@ -538,19 +547,16 @@ struct QuarterChip: View {
     func cell(_ text: Text, help: String, first: Bool = false, last: Bool = false) -> some View {
         text
             .padding(.leading, first ? 8 : 6).padding(.trailing, last ? 8 : 6).padding(.vertical, 2)
-            .background(first ? Color.accentColor.opacity(0.16) : .clear)
             .help(help)
     }
 
     var separator: some View { Rectangle().fill(Color.primary.opacity(0.12)).frame(width: 1).padding(.vertical, 3) }
     var body: some View {
         Button { showDetail.toggle() } label: {
-            // Segmented cells: current quarter · day of quarter · countdown to the next one.
+            // Segmented cells: current quarter · countdown to the next one (day of quarter is in the tooltip and popover).
             HStack(spacing: 0) {
-                cell(Text("Q\(info.quarter)").fontWeight(.semibold), help: "Quarter \(info.quarter) of \(String(info.year))", first: true)
-                separator
-                cell(Text("\(info.dayOfQuarter)") + Text("/\(info.quarterLength)").foregroundColor(.secondary),
-                     help: "Day \(info.dayOfQuarter) of \(info.quarterLength)")
+                cell(Text("Q\(info.quarter)").fontWeight(.semibold),
+                     help: "Quarter \(info.quarter) of \(String(info.year)), day \(info.dayOfQuarter) of \(info.quarterLength)", first: true)
                 separator
                 cell(Text("\(info.daysToNextQuarter)D") + Text(" → Q\(info.nextQuarter)").foregroundColor(.secondary),
                      help: "\(info.daysToNextQuarter) days until Q\(info.nextQuarter)", last: true)
@@ -567,10 +573,11 @@ struct QuarterChip: View {
         .popover(isPresented: $showDetail) {
             let df = DateFormatter()
             VStack(alignment: .leading, spacing: 4) {
-                Text("Q\(info.quarter) \(info.year)").font(.headline)
+                // String(...) so years are not number-formatted ("2,026").
+                Text(verbatim: "Q\(info.quarter) \(String(info.year))").font(.headline)
                 Text("Day \(info.dayOfQuarter) of \(info.quarterLength)")
                 Text("\(info.elapsedCompleteDays) complete days elapsed").foregroundStyle(.secondary)
-                Text("Q\(info.nextQuarter) \(info.nextQuarterYear) begins \({ df.dateStyle = .long; return df.string(from: info.nextQuarterStart) }())")
+                Text(verbatim: "Q\(info.nextQuarter) \(String(info.nextQuarterYear)) begins \({ df.dateStyle = .long; return df.string(from: info.nextQuarterStart) }())")
                 Text("\(info.daysToNextQuarter) days to next quarter")
             }
             .padding(12)

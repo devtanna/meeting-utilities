@@ -156,8 +156,13 @@ final class AppServices: ObservableObject {
         KeyboardShortcuts.onKeyUp(for: .openSettings) { [weak self] in self?.windows.openSettings() }
     }
 
-    /// Join shortcut: reveal a choice when overlapping meetings make the target ambiguous (§5.2).
+    /// Join shortcut: joins the meeting shown in the menu bar. Only when the menu bar shows none does it fall back
+    /// to the current/next meeting, revealing a choice when overlapping meetings make that ambiguous (§5.2).
     func joinFocused() {
+        if let shown = calendar.menuBarItem(), shown.primaryLink != nil {
+            Task { _ = await coordinator.join(shown, source: .manual) }
+            return
+        }
         let targets = AgendaBuilder.ambiguousJoinTargets(calendar.plannerItems, now: Date())
         if targets.count > 1 {
             scheduler.conflictChoice = targets

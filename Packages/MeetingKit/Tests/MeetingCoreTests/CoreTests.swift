@@ -428,6 +428,14 @@ struct AgendaTests {
         #expect(CountdownFormatter.nextRefresh(after: date("2026-11-05 10:00").addingTimeInterval(10), items: items) == date("2026-11-05 10:01"))
     }
 
+    @Test func statusSaysNowForTheFirstMinute() {
+        let m = item("Sync", "2026-11-05 10:00", "2026-11-05 10:30")
+        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 09:59").addingTimeInterval(30), length: .medium) == "Sync • in 1m")
+        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 10:00"), length: .medium) == "Sync • now")
+        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 10:00").addingTimeInterval(59), length: .medium) == "Sync • now")
+        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 10:01"), length: .medium) == "Sync • 29m left")
+    }
+
     @Test func menuBarDisplayOptions() {
         let items = [item("Current", "2026-11-05 10:00", "2026-11-05 11:00"), item("Next", "2026-11-05 10:30", "2026-11-05 11:00")]
         let t = { (s: String) in date(s) }

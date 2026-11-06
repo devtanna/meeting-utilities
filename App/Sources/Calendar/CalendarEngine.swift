@@ -196,6 +196,9 @@ final class CalendarEngine: ObservableObject {
                                          hideCurrentAfterMinutes: settings.hideCurrentAfter < 0 ? nil : settings.hideCurrentAfter)
     }
 
+    /// What "Join" acts on by default: the meeting shown in the menu bar, else the current/next meeting today.
+    func joinTarget(now: Date = Date()) -> AgendaItem? { menuBarItem(now: now) ?? focusItem(now: now) }
+
     func dismiss(_ item: AgendaItem, _ dismissed: Bool) async {
         guard let id = occurrenceID(for: item) else { return }
         try? await store.setDismissed(id, dismissed)
