@@ -66,6 +66,8 @@ final class NotebookViewModel: ObservableObject {
         await occurrenceNotes.load(DocumentKey(scope: .occurrence(notebookID: nb.id, occurrenceID: occ.id), kind: .notes))
         await loadTalktrack()
         await reload()
+        // A date with a saved transcript but no notes opens on the transcript rather than an empty page.
+        if tab == .notes, occurrenceNotes.text.isEmpty, transcript.contains(where: { !$0.segments.isEmpty }) { tab = .transcript }
     }
 
     func loadTalktrack() async {
@@ -481,38 +483,83 @@ struct Badge: View {
     }
 }
 
+/// The saved raw transcript for one date: `[mm:ss]` stamps beside readable text, grouped by capture session.
+/// Summaries are a separate, optional step on the Summary tab.
 struct TranscriptTab: View {
     var transcript: [(session: MeetingSessionRecord, segments: [TranscriptSegmentRecord])]
+    @State private var copied = false
+
+    var speech: [TranscriptSegmentRecord] { transcript.flatMap(\.segments).filter { $0.kind != .gap } }
+    /// Speaker labels only help when both the microphone and other participants were captured.
+    var showSources: Bool { Set(speech.map(\.source)).count > 1 }
+    var useHours: Bool { transcript.flatMap(\.segments).contains { $0.startOffsetMs >= 3_600_000 } }
+
     var body: some View {
+        HStack(spacing: 8) {
+            Text("Transcript").font(.system(size: 13, weight: .semibold))
+            if !speech.isEmpty {
+                Text("\(speech.count) \(speech.count == 1 ? "line" : "lines")").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            PillButton(title: copied ? "Copied" : "Copy Transcript", icon: copied ? "checkmark" : "doc.on.doc") { copy() }
+                .disabled(speech.isEmpty)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        Divider()
         if transcript.isEmpty {
             ContentUnavailableView("No transcript", systemImage: "waveform", description: Text("Start transcription from the agenda, a notification Join, or the button above."))
         } else {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
+                LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(transcript, id: \.session.id) { entry in
-                        let s = entry.session
-                        Text("Session \(s.actualStart?.formatted(date: .omitted, time: .shortened) ?? "–")–\(s.actualEnd?.formatted(date: .omitted, time: .shortened) ?? "…") · \(label(s))")
-                            .font(.caption.bold()).foregroundStyle(.secondary).padding(.top, 6)
-                        ForEach(entry.segments) { seg in
-                            HStack(alignment: .top, spacing: 8) {
-                                Text(stamp(seg.startOffsetMs)).monospacedDigit().foregroundStyle(.tertiary).frame(width: 60, alignment: .leading)
-                                if seg.kind == .gap {
-                                    Text("Gap — no transcript for \(max(1, (seg.endOffsetMs - seg.startOffsetMs) / 1000)) s (\(seg.sourceLabel))")
-                                        .italic().foregroundStyle(.orange)
-                                } else {
-                                    Text(seg.sourceLabel).bold().foregroundStyle(seg.source == "microphone" ? Color.accentColor : .purple).frame(width: 130, alignment: .leading)
-                                    Text(seg.text).textSelection(.enabled)
-                                }
-                            }
-                            .accessibilityElement(children: .combine)
-                        }
+                        if transcript.count > 1 || entry.segments.isEmpty { sessionHeader(entry.session, empty: entry.segments.isEmpty) }
+                        ForEach(entry.segments) { seg in row(seg) }
                     }
                 }
-                .padding(6)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 18).padding(.vertical, 14)
             }
         }
     }
-    func stamp(_ ms: Int) -> String { let t = ms / 1000; return String(format: "%02d:%02d:%02d", t / 3600, (t / 60) % 60, t % 60) }
+
+    func sessionHeader(_ s: MeetingSessionRecord, empty: Bool) -> some View {
+        let range = "\(s.actualStart?.formatted(date: .omitted, time: .shortened) ?? "–")–\(s.actualEnd?.formatted(date: .omitted, time: .shortened) ?? "…")"
+        return Text("Session \(range) · \(label(s))\(empty ? " · no speech recognized" : "")")
+            .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            .padding(.top, 4)
+    }
+
+    func row(_ seg: TranscriptSegmentRecord) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("[\(stamp(seg.startOffsetMs))]")
+                .font(.system(size: 11)).monospacedDigit().foregroundStyle(.tertiary)
+                .frame(width: useHours ? 66 : 48, alignment: .leading)
+            if seg.kind == .gap {
+                Text("No transcript for \(max(1, (seg.endOffsetMs - seg.startOffsetMs) / 1000)) s (\(seg.sourceLabel))")
+                    .font(.system(size: 13)).italic().foregroundStyle(.orange)
+            } else {
+                (showSources ? Text("\(seg.sourceLabel)  ").font(.system(size: 12, weight: .semibold)).foregroundColor(seg.source == "microphone" ? .accentColor : .purple) : Text(""))
+                    + Text(seg.text).font(.system(size: 14))
+            }
+        }
+        .lineSpacing(3)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+    }
+
+    func copy() {
+        let lines = speech.map { "[\(stamp($0.startOffsetMs))] \(showSources ? "\($0.sourceLabel): " : "")\($0.text)" }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+        copied = true
+        Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
+    }
+
+    func stamp(_ ms: Int) -> String {
+        let t = ms / 1000
+        return useHours ? String(format: "%d:%02d:%02d", t / 3600, (t / 60) % 60, t % 60) : String(format: "%02d:%02d", t / 60, t % 60)
+    }
     func label(_ s: MeetingSessionRecord) -> String {
         switch s.state {
         case .interrupted: "interrupted"

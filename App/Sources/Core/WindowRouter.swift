@@ -57,12 +57,13 @@ final class WindowRouter: NSObject, NSWindowDelegate {
         openNotebook(occurrenceID: r.occurrence.id, resolved: r)
     }
 
-    func openNotebook(occurrenceID: UUID, resolved: ResolvedOccurrence? = nil) {
+    func openNotebook(occurrenceID: UUID, resolved: ResolvedOccurrence? = nil, tab: NotebookTab? = nil) {
         Task {
             guard let occ = try? await services.store.occurrence(occurrenceID) else { return }
             let nbID = occ.notebookID
             if let (w, model) = notebookWindows[nbID] {
                 await model.open(occurrenceID: occurrenceID, resolved: resolved)   // meeting switch flushes first
+                if let tab { model.tab = tab }
                 show(w)
                 return
             }
@@ -72,6 +73,7 @@ final class WindowRouter: NSObject, NSWindowDelegate {
             w.identifier = NSUserInterfaceItemIdentifier(nbID.uuidString)
             notebookWindows[nbID] = (w, model)
             await model.open(occurrenceID: occurrenceID, resolved: resolved)
+            if let tab { model.tab = tab }
             w.title = model.notebook?.displayTitle ?? "Notebook"
             show(w)
         }

@@ -40,12 +40,14 @@ struct StartFailureState: Equatable {
 final class MeetingCoordinator: ObservableObject {
     @Published private(set) var active: ActiveSessionState?
     @Published private(set) var linkStates: [UUID: LinkActionState] = [:]
-    @Published var banner: String?
+    @Published var banner: String? { didSet { lastSavedOccurrenceID = nil } }   // stop() sets the ID after the banner
     @Published var startFailure: StartFailureState?
     @Published var pendingSwitch: UUID?                 // "Stop current and start this meeting"
     @Published private(set) var resumable: (occurrenceID: UUID, title: String)?
     @Published var lastFocusResult: FocusResult?
     @Published var lastFailedLink: URL?
+    /// The meeting whose transcript was just saved; the agenda banner offers "View Transcript" for it.
+    @Published var lastSavedOccurrenceID: UUID?
 
     private let store: MeetingStore
     private let calendar: CalendarEngine
@@ -309,6 +311,7 @@ final class MeetingCoordinator: ObservableObject {
         active = nil
         if interrupted { resumable = (a.occurrenceID, a.title) }
         banner = interrupted ? AppErrorCode.sessionInterrupted.message : "Transcription saved"
+        lastSavedOccurrenceID = a.occurrenceID
         Log.capture.info("capture stopped reason=\(reason.rawValue, privacy: .public) segments=\(final?.segmentCount ?? 0, privacy: .public)")
         if a.capture == .capturing, (final?.segmentCount ?? 0) > 0, a.mode == .transcriptAndSummary {
             summaries?.enqueue(occurrenceID: a.occurrenceID, notebookID: a.notebookID)

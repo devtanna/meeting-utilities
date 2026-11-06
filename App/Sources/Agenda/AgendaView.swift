@@ -129,18 +129,41 @@ struct AgendaView: View {
                 Button("Calendars…") { services.windows.openSettings(tab: .calendars) }
             }
         }
-        if let msg = coordinator.banner {
-            bannerRow(icon: "info.circle", text: msg, tint: .accentColor) {
-                if let url = coordinator.lastFailedLink {
-                    Button("Copy link") { services.opener.copy(url) }
+        if let msg = coordinator.banner { infoBanner(msg) }
+    }
+
+    /// Info message with its dismiss button on the same line; secondary details (copy link, Focus result) go below.
+    func infoBanner(_ msg: String) -> some View {
+        let focus = coordinator.lastFocusResult.flatMap { $0 == .disabled ? nil : $0 }
+        let saved = coordinator.lastSavedOccurrenceID
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(msg, systemImage: "info.circle").fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                if let saved {
+                    Button("View Transcript") { services.windows.openNotebook(occurrenceID: saved, tab: .transcript); dismissBanner(); onClose() }
+                        .buttonStyle(.link).font(.system(size: 12))
                 }
-                if let focus = coordinator.lastFocusResult, focus != .disabled {
-                    Text(focus.userMessage).foregroundStyle(.secondary)
+                Button { dismissBanner() } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)) }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).accessibilityLabel("Dismiss message")
+            }
+            if coordinator.lastFailedLink != nil || focus != nil {
+                HStack(spacing: 8) {
+                    if let url = coordinator.lastFailedLink { Button("Copy link") { services.opener.copy(url) }.buttonStyle(.link) }
+                    if let focus { Text(focus.userMessage).foregroundStyle(.secondary) }
                 }
-                Button { coordinator.banner = nil; coordinator.lastFailedLink = nil } label: { Image(systemName: "xmark") }
-                    .buttonStyle(.borderless).accessibilityLabel("Dismiss message")
+                .font(.system(size: 12))
             }
         }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 10).padding(.bottom, 4)
+        .accessibilityElement(children: .contain)
+    }
+
+    func dismissBanner() {
+        coordinator.banner = nil; coordinator.lastFailedLink = nil; coordinator.lastSavedOccurrenceID = nil
     }
 
     func bannerRow<Buttons: View>(icon: String, text: String, tint: Color, @ViewBuilder buttons: () -> Buttons) -> some View {
@@ -162,7 +185,7 @@ struct AgendaView: View {
         VStack(alignment: .leading, spacing: 0) {
             ActionRow(icon: joinIcon(item), title: joinTitle(item), enabled: item?.primaryLink != nil, shortcut: "↩") { joinSelected() }
                 .help(item?.primaryLink == nil ? (item == nil ? "No meeting selected" : AppErrorCode.linkMissing.message) : "Opens the meeting link. You handle the provider's pre-join screen.")
-            ActionRow(icon: "note.text", title: "Open Notes", enabled: item != nil, shortcut: "⌘O") {
+            ActionRow(icon: "note.text", title: "Open Notes, Transcripts & Summaries", enabled: item != nil, shortcut: "⌘O") {
                 if let item { services.windows.openNotebook(for: item); onClose() }
             }
             ActionRow(icon: "calendar", title: openInTitle, enabled: item != nil) {
@@ -293,7 +316,7 @@ struct AgendaView: View {
                 }
             }
         }
-        Button("Open Notes") { services.windows.openNotebook(for: item) }
+        Button("Open Notes, Transcripts & Summaries") { services.windows.openNotebook(for: item) }
         Button("Open Talktrack") { services.windows.openTalktrack(for: item) }
         Button(openInTitle) { services.opener.openInCalendar(item.event) }
         Divider()
