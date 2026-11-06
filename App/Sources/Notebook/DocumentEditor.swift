@@ -168,6 +168,38 @@ struct PlainTextEditor: NSViewRepresentable {
     }
 }
 
+/// Read-only rich text in one NSTextView: native click-drag, Shift-click, double/triple-click, ⌘A and ⌘C across
+/// the whole document (SwiftUI's per-Text selection can't cross lines).
+struct SelectableText: NSViewRepresentable {
+    var text: NSAttributedString
+    var accessibilityLabel = "Text"
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        let tv = scroll.documentView as! NSTextView
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.isRichText = true
+        tv.importsGraphics = false
+        tv.textContainerInset = NSSize(width: 14, height: 14)
+        tv.drawsBackground = false
+        scroll.drawsBackground = false
+        tv.setAccessibilityLabel(accessibilityLabel)
+        tv.textStorage?.setAttributedString(text)
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        let tv = scroll.documentView as! NSTextView
+        // Reloads happen on every database change; only replace text that actually changed, keeping the selection.
+        guard tv.attributedString() != text else { return }
+        let sel = tv.selectedRanges
+        tv.textStorage?.setAttributedString(text)
+        let kept = sel.filter { $0.rangeValue.upperBound <= text.length }
+        tv.selectedRanges = kept.isEmpty ? [NSValue(range: NSRange(location: 0, length: 0))] : kept   // must never be empty
+    }
+}
+
 /// Safe Markdown subset preview: no HTML execution, no remote images (§5.4, §14.6).
 struct MarkdownPreview: View {
     var text: String

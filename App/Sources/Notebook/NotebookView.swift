@@ -509,31 +509,53 @@ struct TranscriptTab: View {
         if transcript.isEmpty {
             ContentUnavailableView("No transcript", systemImage: "waveform", description: Text("Start transcription from the agenda, a notification Join, or the button above."))
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(transcript, id: \.session.id) { entry in
-                        if transcript.count > 1 || entry.segments.isEmpty { sessionHeader(entry.session, empty: entry.segments.isEmpty) }
-                        ForEach(entry.segments) { seg in row(seg) }
-                    }
-                }
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 18).padding(.vertical, 14)
-            }
+            SelectableText(text: attributed(), accessibilityLabel: "Transcript")
         }
     }
 
-    func sessionHeader(_ s: MeetingSessionRecord, empty: Bool) -> some View {
-        let range = "\(s.actualStart?.formatted(date: .omitted, time: .shortened) ?? "–")–\(s.actualEnd?.formatted(date: .omitted, time: .shortened) ?? "…")"
-        let reasons = empty ? Self.diagnosis(s.coverageJSON) : []
-        return VStack(alignment: .leading, spacing: 3) {
-            Text("Session \(range) · \(label(s))\(empty ? " · no speech recognized" : "")")
-                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-            ForEach(reasons, id: \.self) { r in
-                Label(r, systemImage: "exclamationmark.triangle").font(.system(size: 11)).foregroundStyle(.orange)
+    /// The whole transcript as one attributed string, so a selection can span lines, sessions, or everything (⌘A).
+    func attributed() -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let indent: CGFloat = useHours ? 70 : 56
+        let row = NSMutableParagraphStyle()
+        row.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
+        row.headIndent = indent          // wrapped lines align with the text, not the timestamp
+        row.lineSpacing = 3
+        row.paragraphSpacing = 10
+        let header = NSMutableParagraphStyle()
+        header.paragraphSpacingBefore = 4
+        header.paragraphSpacing = 8
+        let stampAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor.tertiaryLabelColor, .paragraphStyle: row]
+        let textAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.labelColor, .paragraphStyle: row]
+        func append(_ string: String, _ attrs: [NSAttributedString.Key: Any]) { out.append(NSAttributedString(string: string, attributes: attrs)) }
+
+        for entry in transcript {
+            let empty = entry.segments.isEmpty
+            if transcript.count > 1 || empty {
+                let s = entry.session
+                let range = "\(s.actualStart?.formatted(date: .omitted, time: .shortened) ?? "–")–\(s.actualEnd?.formatted(date: .omitted, time: .shortened) ?? "…")"
+                append("Session \(range) · \(label(s))\(empty ? " · no speech recognized" : "")\n",
+                       [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: header])
+                for r in empty ? Self.diagnosis(s.coverageJSON) : [] {
+                    append("⚠︎ \(r)\n", [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.systemOrange, .paragraphStyle: header])
+                }
+            }
+            for seg in entry.segments {
+                append("[\(stamp(seg.startOffsetMs))]\t", stampAttrs)
+                if seg.kind == .gap {
+                    append("No transcript for \(max(1, (seg.endOffsetMs - seg.startOffsetMs) / 1000)) s (\(seg.sourceLabel))\n",
+                           [.font: NSFontManager.shared.convert(.systemFont(ofSize: 13), toHaveTrait: .italicFontMask), .foregroundColor: NSColor.systemOrange, .paragraphStyle: row])
+                } else {
+                    if showSources {
+                        append("\(seg.sourceLabel)  ", [.font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                                                        .foregroundColor: seg.source == "microphone" ? NSColor.controlAccentColor : NSColor.systemPurple, .paragraphStyle: row])
+                    }
+                    append(seg.text + "\n", textAttrs)
+                }
             }
         }
-        .padding(.top, 4)
+        if out.length > 0, out.string.hasSuffix("\n") { out.deleteCharacters(in: NSRange(location: out.length - 1, length: 1)) }
+        return out
     }
 
     /// Plain-language reason a session produced no text, from the per-source stats saved when it stopped.
@@ -551,24 +573,6 @@ struct TranscriptTab: View {
             if e.recognized == 0 { return "\(name): \(e.utterances) speech chunk(s) detected, but the speech model returned no words." }
             return nil
         }
-    }
-
-    func row(_ seg: TranscriptSegmentRecord) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("[\(stamp(seg.startOffsetMs))]")
-                .font(.system(size: 11)).monospacedDigit().foregroundStyle(.tertiary)
-                .frame(width: useHours ? 66 : 48, alignment: .leading)
-            if seg.kind == .gap {
-                Text("No transcript for \(max(1, (seg.endOffsetMs - seg.startOffsetMs) / 1000)) s (\(seg.sourceLabel))")
-                    .font(.system(size: 13)).italic().foregroundStyle(.orange)
-            } else {
-                (showSources ? Text("\(seg.sourceLabel)  ").font(.system(size: 12, weight: .semibold)).foregroundColor(seg.source == "microphone" ? .accentColor : .purple) : Text(""))
-                    + Text(seg.text).font(.system(size: 14))
-            }
-        }
-        .lineSpacing(3)
-        .fixedSize(horizontal: false, vertical: true)
-        .accessibilityElement(children: .combine)
     }
 
     func copy() {
