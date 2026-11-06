@@ -1,11 +1,25 @@
 # Release procedure
 
-## Today (development-signed test builds)
-1. `scripts/test.sh`
-2. `scripts/release.sh` → `dist/MeetingUtility-<version>-<build>-arm64.dmg`, `.zip`, `SHA256SUMS.txt`.
-   The script verifies arm64, nested signatures, the MLX metallib inside the service, no MLX symbols in the host,
-   and no model weights in the bundle.
-3. Hand the DMG to testers with `docs/INSTALL-TESTERS.md` (also inside the DMG as "Read Me First").
+## Publishing a release
+
+```sh
+make publish                 # patch: 1.0.0 → 1.0.1
+make publish BUMP=minor      # 1.0.1 → 1.1.0   (also: major, or an exact X.Y.Z)
+make publish-dry BUMP=minor  # bump + test + build only; nothing is committed or pushed
+make publish NOTES=notes.md  # your highlights above the auto-generated changelog
+```
+
+`scripts/publish.sh` checks that you are on a clean `main` in sync with GitHub and that `gh` is logged in. It then:
+1. bumps `MU_VERSION` and `MU_BUILD` (+1) in `Config/Base.xcconfig`, the only place the version lives
+2. runs `scripts/test.sh` and `scripts/release.sh`. That makes a fresh `dist/` with the DMG, zip and `SHA256SUMS.txt`,
+   and verifies arm64, nested signatures, the MLX metallib inside the service only, and no model weights in the bundle
+3. commits "Release vX.Y.Z", tags it, and pushes `main` and the tag
+4. creates the GitHub release with the three files, install notes and generated release notes
+
+If a step before the commit fails, the version bump is undone. If the GitHub release step fails after the push,
+rerun only that step with `gh release create vX.Y.Z dist/*.dmg dist/*.zip dist/SHA256SUMS.txt`.
+
+Builds are ad-hoc signed and not notarized, and users update manually from GitHub Releases (there's no Sparkle feed yet).
 
 ## Blocked until an Apple Developer ID exists (open items)
 - Developer ID signing with Hardened Runtime (set `MU_TEAM_ID`, `CODE_SIGN_IDENTITY = Developer ID Application`,

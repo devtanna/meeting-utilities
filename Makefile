@@ -3,7 +3,7 @@ export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 DEBUG_APP   := build/dd/Build/Products/Debug/MeetingUtility.app
 RELEASE_APP := build/dd/Build/Products/Release/MeetingUtility.app
 
-.PHONY: help dev dev-fake dev-attached build release test bootstrap open stop clean
+.PHONY: help dev dev-fake dev-attached build release publish publish-dry test bootstrap open stop clean
 
 help:
 	@echo "make dev        Build (Debug), launch as a real app (permission prompts work), stream logs; Ctrl-C quits"
@@ -11,6 +11,8 @@ help:
 	@echo "make dev-attached  Run the binary attached to the terminal (debug output; no permission prompts)"
 	@echo "make build      Debug build only"
 	@echo "make release    Release build + DMG/zip in dist/"
+	@echo "make publish    Bump version (BUMP=patch|minor|major|X.Y.Z, default patch), test, build, tag, push, GitHub release"
+	@echo "make publish-dry  Same bump + test + build, but nothing is committed or pushed"
 	@echo "make test       Unit tests + model-manifest check"
 	@echo "make open       Launch the last Debug build detached (like double-clicking)"
 	@echo "make stop       Quit any running copy"
@@ -40,6 +42,14 @@ build:
 
 release:
 	scripts/release.sh
+
+## Optional NOTES=path/to/highlights.md is shown above the generated changelog.
+BUMP ?= patch
+publish:
+	NOTES="$(NOTES)" scripts/publish.sh $(BUMP)
+
+publish-dry:
+	DRY_RUN=1 NOTES="$(NOTES)" scripts/publish.sh $(BUMP)
 
 test:
 	scripts/test.sh

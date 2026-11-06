@@ -100,6 +100,7 @@ make dev                  # Debug build, launch, stream logs (Ctrl-C quits)
 | `make dev-fake` | Same, with a synthetic calendar and a separate sandbox database |
 | `make test` | Package unit tests plus the model-manifest check |
 | `make release` | Release build, then `.dmg`, `.zip` and `SHA256SUMS.txt` in `dist/` |
+| `make publish` | Bump the version, test, build, tag and publish a GitHub release ([docs/release.md](docs/release.md)) |
 | `make help` | All targets |
 
 `MeetingUtility.xcodeproj` is generated from `project.yml` and is not committed. Open it in Xcode after

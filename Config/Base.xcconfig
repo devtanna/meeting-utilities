@@ -1,6 +1,7 @@
 // Defaults first; Identity.xcconfig (included last) may override any of these.
 MU_PRODUCT_NAME = MeetingUtility
 MU_BUNDLE_ID = com.devtanna.meetingutils
+// Version: bumped by `make publish` (scripts/publish.sh). Keep it here, not in Identity.xcconfig.
 MU_VERSION = 1.0.0
 MU_BUILD = 1
 MU_TEAM_ID =
