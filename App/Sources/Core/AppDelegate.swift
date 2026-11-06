@@ -1,9 +1,11 @@
 import AppKit
+import Combine
 import MeetingCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var services: AppServices!
+    private var dockObserver: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Single instance (§B1): hand off to the running copy and quit.
@@ -24,6 +26,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SnapshotRenderer.renderIfRequested(services)
         SelfTest.runIfRequested(services)
         if UserDefaults.standard.string(forKey: "RenderSnapshots") != nil || UserDefaults.standard.string(forKey: "SelfTest") != nil { return }
+        dockObserver = services.settings.$showInDock.removeDuplicates().sink { show in
+            NSApp.setActivationPolicy(show ? .regular : .accessory)
+            // Leaving the Dock deactivates the app; keep the window the user is working in (Settings) in front.
+            if !show { DispatchQueue.main.async { NSApp.activate() } }
+        }
         if !services.settings.onboardingComplete {
             services.windows.openOnboarding()
         } else if let e = services.databaseError {
@@ -53,16 +60,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
             Task {
                 await services.coordinator.stop(reason: .appQuit)
-                await EditorRegistry.shared.flushAll()
-                NSApp.reply(toApplicationShouldTerminate: true)
+                await finishQuit(services)
             }
             return .terminateLater
         }
-        guard EditorRegistry.shared.hasUnsavedEdits else { return .terminateNow }
-        Task {
-            await EditorRegistry.shared.flushAll()
-            NSApp.reply(toApplicationShouldTerminate: true)
-        }
+        Task { await finishQuit(services) }
         return .terminateLater
+    }
+
+    /// Saves pending edits and withdraws scheduled reminders. Reminders are handed to macOS ahead of time and macOS
+    /// delivers them even when the app isn't running, so a quit app would otherwise keep notifying. The next launch
+    /// schedules them again. (A crash or force quit can't run this.)
+    private func finishQuit(_ services: AppServices) async {
+        await EditorRegistry.shared.flushAll()
+        await services.notifications.withdrawAllForQuit()
+        NSApp.reply(toApplicationShouldTerminate: true)
     }
 }

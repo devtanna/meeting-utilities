@@ -70,6 +70,17 @@ final class NotificationController: NSObject, ObservableObject, UNUserNotificati
         center.removeAllPendingNotificationRequests()
     }
 
+    /// Removes every scheduled reminder and waits (up to 2 s) until macOS reports none pending, so the removal has
+    /// been processed before the process exits.
+    func withdrawAllForQuit() async {
+        center.removeAllPendingNotificationRequests()
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline, !(await center.pendingNotificationRequests().isEmpty) {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        Log.notifications.info("reminders withdrawn for quit")
+    }
+
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let occ = (notification.request.content.userInfo[NotificationActionID.occurrenceKey] as? String).flatMap(UUID.init(uuidString:))
         let shown = await MainActor.run { occ.map { self.inAppPresentedOccurrences().contains($0) } ?? false }

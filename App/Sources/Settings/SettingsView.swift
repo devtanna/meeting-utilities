@@ -68,7 +68,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     /// Extra words matched by the sidebar search.
     var keywords: String {
         switch self {
-        case .general: "menu bar notch presentation login startup shortcut hotkey quarter time format compact status"
+        case .general: "menu bar notch presentation login startup dock icon running shortcut hotkey quarter time format compact status"
         case .calendars: "calendar access permission accounts google exchange icloud"
         case .agenda: "filter all-day declined tentative dismissed link display options hide current event default application calendar app fantastical menu bar"
         case .reminders: "notification alert minutes"
@@ -302,6 +302,10 @@ struct GeneralSettings: View {
         SettingsCard {
             SettingsRow(title: "Open at login", subtitle: LoginItem.statusText) {
                 Switch(isOn: $loginOn, label: "Open at login").onChange(of: loginOn) { _, v in LoginItem.set(v) }
+            }
+            RowDivider()
+            SettingsRow(title: "Show in Dock", subtitle: "See at a glance that Meeting Utility is running. Click the icon for Settings.") {
+                Switch(isOn: $settings.showInDock, label: "Show in Dock")
             }
             RowDivider()
             SettingsRow(title: "Setup assistant", subtitle: "Walk through permissions and preferences again.") {

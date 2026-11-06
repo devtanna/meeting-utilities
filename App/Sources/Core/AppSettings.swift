@@ -72,6 +72,7 @@ final class AppSettings: ObservableObject {
     @Published var intervalSoundEnabled: Bool { didSet { d.set(intervalSoundEnabled, forKey: "intervalSoundEnabled") } }
     @Published var intervalSound: String { didSet { d.set(intervalSound, forKey: "intervalSound") } }
     @Published var intervalMinutes: Int { didSet { d.set(intervalMinutes, forKey: "intervalMinutes") } }
+    @Published var showInDock: Bool { didSet { d.set(showInDock, forKey: "showInDock") } }
     @Published var intervalWindow: ChimePlanner.ChimeWindow { didSet { save(intervalWindow, "intervalWindow") } }
 
     @Published var updatePreferenceAsked: Bool { didSet { d.set(updatePreferenceAsked, forKey: "updatePreferenceAsked") } }
@@ -126,6 +127,7 @@ final class AppSettings: ObservableObject {
         intervalSoundEnabled = d.bool(forKey: "intervalSoundEnabled")
         intervalSound = d.string(forKey: "intervalSound") ?? "mu.soft-beep"
         intervalMinutes = d.object(forKey: "intervalMinutes") as? Int ?? 30
+        showInDock = d.bool(forKey: "showInDock")
         intervalWindow = get("intervalWindow", ChimePlanner.ChimeWindow.workdays)
     }
 
