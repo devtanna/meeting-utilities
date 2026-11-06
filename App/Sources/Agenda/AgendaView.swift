@@ -519,12 +519,33 @@ struct StatusSymbol: View {
 struct QuarterChip: View {
     var info: QuarterInfo
     @State private var showDetail = false
+
+    func cell(_ text: Text, help: String, first: Bool = false, last: Bool = false) -> some View {
+        text
+            .padding(.leading, first ? 8 : 6).padding(.trailing, last ? 8 : 6).padding(.vertical, 2)
+            .background(first ? Color.accentColor.opacity(0.16) : .clear)
+            .help(help)
+    }
+
+    var separator: some View { Rectangle().fill(Color.primary.opacity(0.12)).frame(width: 1).padding(.vertical, 3) }
     var body: some View {
         Button { showDetail.toggle() } label: {
-            Text(info.shortLabel)
-                .font(.system(size: 11, weight: .medium)).monospacedDigit()
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color.secondary.opacity(0.15), in: Capsule())
+            // Segmented cells: current quarter · day of quarter · countdown to the next one.
+            HStack(spacing: 0) {
+                cell(Text("Q\(info.quarter)").fontWeight(.semibold), help: "Quarter \(info.quarter) of \(String(info.year))", first: true)
+                separator
+                cell(Text("\(info.dayOfQuarter)") + Text("/\(info.quarterLength)").foregroundColor(.secondary),
+                     help: "Day \(info.dayOfQuarter) of \(info.quarterLength)")
+                separator
+                cell(Text("\(info.daysToNextQuarter)D") + Text(" → Q\(info.nextQuarter)").foregroundColor(.secondary),
+                     help: "\(info.daysToNextQuarter) days until Q\(info.nextQuarter)", last: true)
+            }
+            .font(.system(size: 11, weight: .medium)).monospacedDigit()
+            .fixedSize()   // separators would otherwise stretch to fill the height
+            .background(Color.secondary.opacity(0.12))
+            .clipShape(Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08)))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Quarter \(info.quarter), day \(info.dayOfQuarter) of \(info.quarterLength), \(info.daysToNextQuarter) days to next quarter")
