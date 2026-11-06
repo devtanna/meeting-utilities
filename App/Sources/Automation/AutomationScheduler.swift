@@ -36,21 +36,18 @@ final class AutomationScheduler: ObservableObject {
         }
     }
 
-    func autoJoinOverride(occurrenceID: UUID, notebookID: UUID) async -> (Bool?, Bool?) {
-        let o = try? await store.setting(Bool.self, scope: "occurrence", id: occurrenceID.uuidString, key: "autoJoin")
-        let s = try? await store.setting(Bool.self, scope: "notebook", id: notebookID.uuidString, key: "autoJoin")
-        return (o ?? nil, s ?? nil)
-    }
-
     func replan() {
         Task {
             let now = Date()
             let ledger = (try? await store.actionStates(kind: .autoJoin)) ?? [:]
             var cands: [UUID: (AutoJoinCandidate, AgendaItem)] = [:]
             var plannable: [PlannableOccurrence] = []
-            for item in calendar.plannerItems {
-                guard let r = calendar.resolvedOccurrence(for: item) else { continue }
-                let (o, s) = await autoJoinOverride(occurrenceID: r.occurrence.id, notebookID: r.notebook.id)
+            let planned = calendar.plannerItems.compactMap { item in calendar.resolvedOccurrence(for: item).map { (item, $0) } }
+            // Per-occurrence and per-series overrides: one query per scope instead of two per meeting.
+            let occAutoJoin = (try? await store.settings(Bool.self, scope: "occurrence", ids: planned.map(\.1.occurrence.id.uuidString), key: "autoJoin")) ?? [:]
+            let seriesAutoJoin = (try? await store.settings(Bool.self, scope: "notebook", ids: planned.map(\.1.notebook.id.uuidString), key: "autoJoin")) ?? [:]
+            for (item, r) in planned {
+                let o = occAutoJoin[r.occurrence.id.uuidString], s = seriesAutoJoin[r.notebook.id.uuidString]
                 let resolved = ScopedValue.resolve(occurrence: o, series: s, global: settings.autoJoinGlobal)
                 let linkCount = item.primaryLink == nil ? 0 : 1
                 let c = AutoJoinCandidate(occurrenceID: r.occurrence.id, start: item.event.start, end: item.event.end, autoJoinEnabled: resolved.value,

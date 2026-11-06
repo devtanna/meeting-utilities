@@ -607,7 +607,7 @@ struct CaptureIndicator: View {
                 ForEach(state.sources, id: \.self) { s in
                     HStack(spacing: 3) {
                         Text(s.label).foregroundStyle(.secondary)
-                        LevelBar(db: state.levels[s] ?? -120)
+                        LiveLevelBar(meters: coordinator.meters, source: s)
                     }
                 }
                 Spacer()
@@ -646,6 +646,13 @@ struct CaptureIndicator: View {
         default: state.capture.rawValue
         }
     }
+}
+
+/// Observes only the level meters, so meter ticks don't re-render the surrounding view.
+struct LiveLevelBar: View {
+    @ObservedObject var meters: LevelMeters
+    var source: CaptureSource
+    var body: some View { LevelBar(db: meters.levels[source] ?? -120) }
 }
 
 struct LevelBar: View {

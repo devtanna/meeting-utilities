@@ -214,3 +214,20 @@ struct PersistenceTests {
         #expect(String(decoding: bundle.json, as: UTF8.self).contains("\"exportSchemaVersion\" : 1"))
     }
 }
+
+@Suite("Scoped settings")
+struct ScopedSettingsTests {
+    @Test func batchedReadMatchesSingleReads() async throws {
+        let store = MeetingStore(database: try AppDatabase.temporary())
+        try await store.setSetting(true, scope: "occurrence", id: "a", key: "autoJoin")
+        try await store.setSetting(false, scope: "occurrence", id: "b", key: "autoJoin")
+        try await store.setSetting(true, scope: "notebook", id: "a", key: "autoJoin")      // other scope
+        try await store.setSetting(true, scope: "occurrence", id: "c", key: "otherKey")    // other key
+        let batch = try await store.settings(Bool.self, scope: "occurrence", ids: ["a", "b", "c", "d", "a"], key: "autoJoin")
+        #expect(batch == ["a": true, "b": false])
+        for id in ["a", "b", "c", "d"] {
+            #expect(try await store.setting(Bool.self, scope: "occurrence", id: id, key: "autoJoin") == batch[id])
+        }
+        #expect(try await store.settings(Bool.self, scope: "occurrence", ids: [String](), key: "autoJoin").isEmpty)
+    }
+}

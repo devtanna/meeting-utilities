@@ -191,5 +191,9 @@ enum CalendarApps {
         }
     }
 
-    @MainActor static func name(_ id: String) -> String { installed().first { $0.id == id }?.name ?? "Calendar" }
+    /// Looks up only the one app (the agenda calls this on every render).
+    @MainActor static func name(_ id: String) -> String {
+        guard id != apple, known.contains(id), let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return "Calendar" }
+        return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+    }
 }

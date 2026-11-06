@@ -108,8 +108,9 @@ final class AppServices: ObservableObject {
         updates.start(canRelaunch: { [weak self] in self?.canRelaunchForUpdate ?? true })
         registerShortcuts()
         scheduleClock()
-        settings.objectWillChange.sink { [weak self] _ in
-            Task { @MainActor in self?.scheduler.replan() }
+        // Coalesced: a slider drag or a burst of toggles replans once, not once per change.
+        settings.objectWillChange.debounce(for: .milliseconds(250), scheduler: RunLoop.main).sink { [weak self] _ in
+            self?.scheduler.replan()
         }.store(in: &cancellables)
         for name in [Notification.Name.NSCalendarDayChanged, .NSSystemTimeZoneDidChange, .NSSystemClockDidChange] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in

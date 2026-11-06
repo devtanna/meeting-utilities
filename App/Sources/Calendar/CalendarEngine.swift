@@ -135,13 +135,15 @@ final class CalendarEngine: ObservableObject {
                 // Confirmed disappearance in a healthy refresh marks occurrences missing; content kept.
                 let seen = Set(resolvedMap.values.map(\.occurrence.id))
                 try? await store.markMissing(in: plannerRange, seenOccurrenceIDs: seen, calendarIDs: ids)
+                // Link overrides: occurrence first, then series. One query per scope instead of two per event.
+                let occOverrides = (try? await store.settings(LinkOverride.self, scope: "occurrence", ids: resolvedMap.values.map(\.occurrence.id.uuidString), key: "linkOverride")) ?? [:]
+                let nbOverrides = (try? await store.settings(LinkOverride.self, scope: "notebook", ids: resolvedMap.values.map(\.notebook.id.uuidString), key: "linkOverride")) ?? [:]
                 var items: [String: AgendaItem] = [:]
                 for (id, e) in byID {
                     let candidates = linkExtractor.candidates(for: e)
                     var override: LinkOverride?
                     if let r = resolvedMap[id] {
-                        override = try? await store.setting(LinkOverride.self, scope: "occurrence", id: r.occurrence.id.uuidString, key: "linkOverride")
-                        if override == nil { override = try? await store.setting(LinkOverride.self, scope: "notebook", id: r.notebook.id.uuidString, key: "linkOverride") }
+                        override = occOverrides[r.occurrence.id.uuidString] ?? nbOverrides[r.notebook.id.uuidString]
                     }
                     let (primary, _) = LinkSelection.choose(candidates: candidates, override: override)
                     items[id] = AgendaItem(event: e, primaryLink: primary, alternativeLinks: candidates.filter { $0 != primary },

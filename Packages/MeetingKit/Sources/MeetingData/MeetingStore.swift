@@ -437,6 +437,23 @@ public final class MeetingStore: Sendable {
         }
     }
 
+    /// `setting` for many scope IDs in one query, keyed by scope ID. IDs without a (decodable) value are absent.
+    public func settings<T: Codable & Sendable>(_ type: T.Type, scope: String, ids: some Collection<String>, key: String) async throws -> [String: T] {
+        let ids = Array(Set(ids))
+        guard !ids.isEmpty else { return [:] }
+        return try await pool.read { db in
+            let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            let rows = try Row.fetchAll(db, sql: "SELECT scope_id, value_json FROM scoped_settings WHERE scope_kind = ? AND setting_key = ? AND scope_id IN (\(marks))",
+                                        arguments: StatementArguments([scope, key] + ids))
+            var out: [String: T] = [:]
+            for r in rows {
+                let id: String = r["scope_id"], json: String = r["value_json"]
+                if let v = try? JSONDecoder().decode(T.self, from: Data(json.utf8)) { out[id] = v }
+            }
+            return out
+        }
+    }
+
     public func setSetting<T: Codable & Sendable>(_ value: T?, scope: String, id: String, key: String) async throws {
         try await pool.write { db in
             if let value {

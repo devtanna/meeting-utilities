@@ -20,12 +20,18 @@ struct ActiveSessionState: Equatable {
     var sources: [CaptureSource]
     var mode: AutomationMode
     var startedAt: Date?
-    var levels: [CaptureSource: Float] = [:]
     var lagSeconds: Double = 0
     var gapCount = 0
     var segmentCount = 0
     var showEndPrompt = false
     var message: String?
+}
+
+/// Live input levels for the capture meters. Kept out of `ActiveSessionState` so the ~10 Hz per-source updates
+/// redraw only the meters, not every view that observes the coordinator (agenda, open notebooks, menu-bar title).
+@MainActor
+final class LevelMeters: ObservableObject {
+    @Published var levels: [CaptureSource: Float] = [:]
 }
 
 struct StartFailureState: Equatable {
@@ -59,6 +65,7 @@ final class MeetingCoordinator: ObservableObject {
     var summaries: SummaryCoordinator?
 
     private let capture = CaptureController()
+    let meters = LevelMeters()
     private var pumpTask: Task<Void, Never>?
     private var promptTimer: Timer?
     private var deadlineTimer: Timer?
@@ -199,6 +206,7 @@ final class MeetingCoordinator: ObservableObject {
         generation += 1
         let gen = generation
         recognition = [:]
+        meters.levels = [:]
         active = ActiveSessionState(sessionID: record.id, occurrenceID: occurrenceID, notebookID: notebookID, title: title, capture: .preflight,
                                     transcription: .ready, deadline: SessionDeadline(calendarDeadline: calendarEnd), sources: sources, mode: mode)
         do {
@@ -470,7 +478,7 @@ final class MeetingCoordinator: ObservableObject {
                     // ≤10 Hz UI updates per source (§21.3); a shared throttle starved the second meter.
                     if Date().timeIntervalSince(lastLevel[source] ?? .distantPast) > 0.1 {
                         lastLevel[source] = Date()
-                        self?.update { $0.levels[source] = db }
+                        if self?.active != nil { self?.meters.levels[source] = db }
                     }
                 case .sourceDropped(let source, let secs, let at):
                     await commitGap(source, start: at - secs, end: at)
