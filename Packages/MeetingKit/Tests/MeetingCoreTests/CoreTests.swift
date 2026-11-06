@@ -441,7 +441,35 @@ struct AgendaTests {
         // Upcoming only within lookahead.
         #expect(AgendaBuilder.menuBarItem([items[1]], now: t("2026-11-05 10:00"), lookaheadMinutes: 15, hideCurrentAfterMinutes: nil) == nil)
         #expect(AgendaBuilder.menuBarItem([items[1]], now: t("2026-11-05 10:16"), lookaheadMinutes: 15, hideCurrentAfterMinutes: nil)?.event.title == "Next")
-        #expect(AgendaBuilder.menuBarItem([items[1]], now: t("2026-11-05 08:00"), lookaheadMinutes: nil, hideCurrentAfterMinutes: nil)?.event.title == "Next")
+        #expect(AgendaBuilder.menuBarItem([items[1]], now: t("2026-11-05 08:00"), lookaheadMinutes: nil, hideCurrentAfterMinutes: nil, calendar: gmt)?.event.title == "Next")
+    }
+
+    var gmt: Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = .gmt; return c }
+
+    @Test func upcomingIsTodayOnly() {
+        let tomorrow = item("Tomorrow", "2026-11-06 09:00", "2026-11-06 09:30")
+        // "Always" (nil lookahead) never reaches into tomorrow, nor does a long lookahead late at night.
+        #expect(AgendaBuilder.menuBarItem([tomorrow], now: date("2026-11-05 17:00"), lookaheadMinutes: nil, hideCurrentAfterMinutes: nil, calendar: gmt) == nil)
+        let early = item("Early", "2026-11-06 00:30", "2026-11-06 01:00")
+        #expect(AgendaBuilder.menuBarItem([early], now: date("2026-11-05 23:00"), lookaheadMinutes: 240, hideCurrentAfterMinutes: nil, calendar: gmt) == nil)
+        #expect(AgendaBuilder.menuBarItem([early], now: date("2026-11-06 00:10"), lookaheadMinutes: nil, hideCurrentAfterMinutes: nil, calendar: gmt)?.event.title == "Early")
+    }
+
+    @Test func dismissedStaysListedButLeavesMenuBar() {
+        var d = item("Dismissed", "2026-11-05 10:00", "2026-11-05 10:30"); d.isDismissed = true
+        let next = item("Next", "2026-11-05 11:00", "2026-11-05 11:30")
+        #expect(AgendaBuilder.applyFilters([d, next], filters: AgendaFilters()).map(\.event.title) == ["Dismissed", "Next"])
+        #expect(AgendaBuilder.menuBarItem([d, next], now: date("2026-11-05 10:05"), lookaheadMinutes: nil, hideCurrentAfterMinutes: nil, calendar: gmt)?.event.title == "Next")
+        #expect(ChimePlanner.meetingCues([d], leadMinutes: 2, now: date("2026-11-05 09:00"), alreadyPlayed: []).isEmpty)
+    }
+
+    @Test func countdownShowsMinutesOnlyWithinAnHour() {
+        #expect(CountdownFormatter.format(minutes: 45) == "45m")
+        #expect(CountdownFormatter.format(minutes: 60) == "60m")
+        #expect(CountdownFormatter.format(minutes: 61) == "1h")
+        #expect(CountdownFormatter.format(minutes: 157) == "2h")   // 2h 37m
+        let i = item("LM Incident Refresher", "2026-11-05 12:37", "2026-11-05 13:00")
+        #expect(CountdownFormatter.statusTitle(item: i, now: date("2026-11-05 10:00"), length: .long) == "LM Incident Refresher • in 2h")
     }
 }
 

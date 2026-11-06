@@ -398,14 +398,14 @@ struct AgendaSettings: View {
     @ObservedObject var settings: AppSettings
     @State private var apps: [CalendarApps.App] = []
 
-    static let lookaheadOptions: [(Int, String)] = [(-1, "Always"), (5, "5 minutes"), (10, "10 minutes"), (15, "15 minutes"), (30, "30 minutes"),
+    static let lookaheadOptions: [(Int, String)] = [(-1, "Any time today"), (5, "5 minutes"), (10, "10 minutes"), (15, "15 minutes"), (30, "30 minutes"),
                                                     (60, "1 hour"), (120, "2 hours"), (240, "4 hours")]
     static let hideOptions: [(Int, String)] = [(-1, "When it ends"), (0, "As soon as it starts"), (5, "5 minutes after"), (10, "10 minutes after"),
                                                (15, "15 minutes after"), (30, "30 minutes after")]
 
     var body: some View {
         SettingsCard {
-            SettingsRow(title: "Display options", subtitle: "Show the next event in the menu bar this long before it starts.") {
+            SettingsRow(title: "Display options", subtitle: "Show today's next event in the menu bar this long before it starts. Tomorrow's events never appear early.") {
                 Picker("Display options", selection: $settings.menuBarLookahead) {
                     ForEach(Self.lookaheadOptions, id: \.0) { Text($0.1).tag($0.0) }
                 }.labelsHidden().fixedSize()
@@ -445,10 +445,8 @@ struct AgendaSettings: View {
             SettingsRow(title: "Hide declined events", subtitle: "Declined events never trigger automatic actions.") { Switch(isOn: $settings.filters.hideDeclined, label: "Hide declined events") }
             RowDivider()
             SettingsRow(title: "Hide tentative events") { Switch(isOn: $settings.filters.hideTentative, label: "Hide tentative events") }
-            RowDivider()
-            SettingsRow(title: "Show dismissed events", subtitle: "Dismissing only hides an event here; your calendar is unchanged.") { Switch(isOn: $settings.filters.showDismissed, label: "Show dismissed events") }
         }
-        Footnote("Cancelled events are never shown. Hidden events keep their notes.")
+        Footnote("Cancelled events are never shown. Hidden events keep their notes. Dismissed events stay in the agenda (dimmed) but leave the menu bar and get no reminders or sounds; use the eye on a row to dismiss or restore it.")
             .task { apps = CalendarApps.installed() }
     }
 

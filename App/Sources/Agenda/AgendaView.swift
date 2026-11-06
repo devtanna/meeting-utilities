@@ -172,9 +172,9 @@ struct AgendaView: View {
                 ActionRow(icon: "arrow.uturn.backward.circle", title: "Undo Dismiss", enabled: true) { Task { await calendar.dismiss(item, false) } }
             } else {
                 ActionRow(icon: "xmark.circle", title: "Dismiss Event", enabled: item != nil) {
-                    if let item { Task { await calendar.dismiss(item, true) }; selectedID = nil }
+                    if let item { Task { await calendar.dismiss(item, true) } }
                 }
-                .help("Hides this occurrence and its reminders in Meeting Utility. Your calendar event is not changed.")
+                .help(AgendaRow.dismissHelp)
             }
             transcriptionAction(item)
         }
@@ -267,7 +267,8 @@ struct AgendaView: View {
         }
         ForEach(section.items) { item in
             AgendaRow(item: item, now: services.now, isSelected: selected?.id == item.id, timeFormat: settings.timeFormat,
-                      active: coordinator.active?.occurrenceID == calendar.occurrenceID(for: item))
+                      active: coordinator.active?.occurrenceID == calendar.occurrenceID(for: item),
+                      toggleDismissed: { Task { await calendar.dismiss(item, !item.isDismissed) } })
                 .onTapGesture { selectedID = item.id }
                 .onTapGesture(count: 2) { selectedID = item.id; services.windows.openNotebook(for: item); onClose() }
                 .contextMenu { rowMenu(item) }
@@ -394,7 +395,10 @@ struct AgendaRow: View {
     var isSelected: Bool
     var timeFormat: TimeFormatPreference
     var active: Bool
+    var toggleDismissed: () -> Void = {}
     @State private var hover = false
+
+    static let dismissHelp = "Dismiss: hide this meeting from the menu bar and silence its reminders and sounds, for this occurrence only. It stays in this list, and your calendar is unchanged."
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
@@ -407,7 +411,7 @@ struct AgendaRow: View {
                 .strikethrough(e.rsvp == .declined, color: .secondary)
             Spacer(minLength: 4)
             if item.primaryLink == nil && !e.isAllDay { Image(systemName: "link.badge.plus").opacity(0).accessibilityHidden(true) }
-            if item.isDismissed { Text("Dismissed").font(.system(size: 11)).foregroundStyle(.tertiary) }
+            dismissToggle
         }
         .padding(.horizontal, 12)
         .frame(height: AgendaView.rowHeight)
@@ -420,6 +424,23 @@ struct AgendaRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+    }
+
+    /// Eye toggle: always visible (crossed out) when dismissed, otherwise on hover or selection.
+    @ViewBuilder var dismissToggle: some View {
+        let show = item.isDismissed || hover || isSelected
+        Button(action: toggleDismissed) {
+            Image(systemName: item.isDismissed ? "eye.slash" : "eye")
+                .font(.system(size: 11))
+                .foregroundStyle(item.isDismissed ? .secondary : .tertiary)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(show ? 1 : 0)
+        .allowsHitTesting(show)
+        .help(item.isDismissed ? "Undo dismiss: show in the menu bar again, with reminders and sounds" : Self.dismissHelp)
+        .accessibilityLabel(item.isDismissed ? "Undo dismiss" : "Dismiss")
     }
 
     var timeRange: String {

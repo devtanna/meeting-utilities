@@ -5,6 +5,7 @@ public struct AgendaFilters: Sendable, Equatable, Codable {
     public var hideDeclined = false
     public var hideTentative = false
     public var hideLinkless = false
+    /// No longer used: dismissed occurrences always stay in the agenda (dimmed). Kept so saved settings decode.
     public var showDismissed = false
     public init(hideAllDay: Bool = false, hideDeclined: Bool = false, hideTentative: Bool = false,
                 hideLinkless: Bool = false, showDismissed: Bool = false) {
@@ -49,7 +50,7 @@ public enum AgendaBuilder {
         items.filter { item in
             let e = item.event
             if e.isCancelled { return false }
-            if item.isDismissed && !filters.showDismissed { return false }
+            // Dismissed occurrences stay listed (dimmed); dismissing only affects the menu bar, reminders and sounds.
             if filters.hideAllDay && e.isAllDay { return false }
             if filters.hideDeclined && e.rsvp == .declined { return false }
             if filters.hideTentative && e.rsvp == .tentative { return false }
@@ -78,10 +79,12 @@ public enum AgendaBuilder {
     }
 
     /// What the compact menu-bar status shows, honouring the display options:
-    /// - `lookaheadMinutes`: an upcoming meeting appears only when it starts within this many minutes (nil = always).
+    /// - `lookaheadMinutes`: an upcoming meeting appears only when it starts within this many minutes (nil = any time
+    ///   today). Upcoming meetings are always limited to today; tomorrow's first meeting never shows tonight.
     /// - `hideCurrentAfterMinutes`: a running meeting is hidden once it has run this long (nil = keep until it ends,
     ///   0 = hide as soon as it starts); the next meeting can then take its place.
-    public static func menuBarItem(_ items: [AgendaItem], now: Date, lookaheadMinutes: Int?, hideCurrentAfterMinutes: Int?) -> AgendaItem? {
+    public static func menuBarItem(_ items: [AgendaItem], now: Date, lookaheadMinutes: Int?, hideCurrentAfterMinutes: Int?,
+                                   calendar: Calendar = .current) -> AgendaItem? {
         let candidates = sort(items.filter {
             !$0.event.isAllDay && !$0.event.isCancelled && $0.event.rsvp != .declined && !$0.isDismissed && $0.event.end > now
         })
@@ -91,7 +94,8 @@ public enum AgendaBuilder {
             return now.timeIntervalSince(e.event.start) < Double(after) * 60
         }
         if let current { return current }
-        guard let next = candidates.first(where: { $0.event.start > now }) else { return nil }
+        guard let next = candidates.first(where: { $0.event.start > now }),
+              calendar.isDate(next.event.start, inSameDayAs: now) else { return nil }
         if let look = lookaheadMinutes, next.event.start.timeIntervalSince(now) > Double(look) * 60 { return nil }
         return next
     }
@@ -119,7 +123,7 @@ public enum CompactStatusContent: String, Sendable, Codable, CaseIterable {
 }
 
 public enum CountdownFormatter {
-    /// Minute-level countdown, e.g. "in 54m", "in 1h 5m", "now", "12m left".
+    /// Countdown: minutes up to an hour away, whole hours beyond, e.g. "in 54m", "in 60m", "in 2h", "now", "12m left".
     public static func phrase(for item: AgendaItem, now: Date) -> String {
         let e = item.event
         if e.isActive(at: now) {
@@ -131,10 +135,9 @@ public enum CountdownFormatter {
         return "in \(format(minutes: mins))"
     }
 
+    /// Minutes only within the last hour ("45m", "60m"); beyond that whole hours, rounded down ("2h" for 2h 37m).
     public static func format(minutes: Int) -> String {
-        if minutes < 60 { return "\(minutes)m" }
-        let h = minutes / 60, m = minutes % 60
-        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
+        minutes <= 60 ? "\(minutes)m" : "\(minutes / 60)h"
     }
 
     public static func truncate(_ s: String, to max: Int?) -> String {
