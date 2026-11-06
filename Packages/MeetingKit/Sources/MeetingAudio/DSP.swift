@@ -129,13 +129,15 @@ public struct StreamingResampler: Sendable {
 }
 
 public enum Downmix {
-    /// Averages interleaved channels into mono, according to the observed channel count.
+    /// Averages interleaved channels into mono. Like Meetily, only the first two channels of a mic array are used:
+    /// extra beam-forming channels can be anti-phase, and averaging them in cancels the voice to near silence.
     public static func interleavedToMono(_ p: UnsafePointer<Float>, frames: Int, channels: Int, into out: UnsafeMutablePointer<Float>) {
         if channels == 1 { out.update(from: p, count: frames); return }
-        let scale = 1 / Float(channels)
+        let used = min(channels, 2)
+        let scale = 1 / Float(used)
         for f in 0..<frames {
             var s: Float = 0
-            for c in 0..<channels { s += p[f * channels + c] }
+            for c in 0..<used { s += p[f * channels + c] }
             out[f] = s * scale
         }
     }

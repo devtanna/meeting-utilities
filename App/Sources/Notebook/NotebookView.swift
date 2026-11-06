@@ -525,9 +525,32 @@ struct TranscriptTab: View {
 
     func sessionHeader(_ s: MeetingSessionRecord, empty: Bool) -> some View {
         let range = "\(s.actualStart?.formatted(date: .omitted, time: .shortened) ?? "–")–\(s.actualEnd?.formatted(date: .omitted, time: .shortened) ?? "…")"
-        return Text("Session \(range) · \(label(s))\(empty ? " · no speech recognized" : "")")
-            .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-            .padding(.top, 4)
+        let reasons = empty ? Self.diagnosis(s.coverageJSON) : []
+        return VStack(alignment: .leading, spacing: 3) {
+            Text("Session \(range) · \(label(s))\(empty ? " · no speech recognized" : "")")
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            ForEach(reasons, id: \.self) { r in
+                Label(r, systemImage: "exclamationmark.triangle").font(.system(size: 11)).foregroundStyle(.orange)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    /// Plain-language reason a session produced no text, from the per-source stats saved when it stopped.
+    static func diagnosis(_ json: String) -> [String] {
+        guard let d = try? JSONDecoder().decode(MeetingCoordinator.SessionDiagnostics.self, from: Data(json.utf8)) else { return [] }
+        return CaptureSource.allCases.compactMap { source in
+            guard let e = d.sources[source.rawValue] else { return nil }
+            let name = "\(source == .microphone ? "Microphone" : "System audio")\(e.device.isEmpty ? "" : " (\(e.device))")"
+            if e.audioSeconds < 0.5 { return "\(name): no audio received\(e.restarts > 0 ? " after \(e.restarts) restart(s)" : ""). Check the device in Settings › Transcription." }
+            if e.utterances == 0 {
+                return e.peakDB < -50 ? "\(name): audio was almost silent (loudest \(Int(e.peakDB)) dB). Check the input level or pick another microphone."
+                                      : "\(name): audio received (loudest \(Int(e.peakDB)) dB) but no speech was detected."
+            }
+            if e.failed > 0 && e.recognized == 0 { return "\(name): \(e.failed) of \(e.utterances) speech chunks failed to transcribe." }
+            if e.recognized == 0 { return "\(name): \(e.utterances) speech chunk(s) detected, but the speech model returned no words." }
+            return nil
+        }
     }
 
     func row(_ seg: TranscriptSegmentRecord) -> some View {

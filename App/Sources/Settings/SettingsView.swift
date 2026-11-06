@@ -774,8 +774,6 @@ struct TranscriptionSettings: View {
                 }.labelsHidden().frame(maxWidth: 220)
             }
             RowDivider()
-            SettingsRow(title: "Voice processing", subtitle: "Reduces echo when using speakers instead of headphones.") { Switch(isOn: $settings.voiceProcessing, label: "Voice processing") }
-            RowDivider()
             SettingsRow(title: "Test microphone", subtitle: micResult ?? "Speak for a few seconds after pressing Test.") {
                 Button("Test") { testMic() }.disabled(testing)
             }
@@ -784,7 +782,7 @@ struct TranscriptionSettings: View {
                 Button("Test") { testSystem() }.disabled(testing)
             }
         }
-        Footnote("“Other participants” is everything your Mac plays (excluding Meeting Utility itself), so other apps' sound during a meeting is included. Labels are sources, not verified speakers.")
+        Footnote("“Other participants” is everything your Mac plays (including Meeting Utility's own chimes), so other apps' sound during a meeting is included. Labels are sources, not verified speakers.")
             .task { devices = AudioDevices.all() }
     }
 
@@ -799,7 +797,7 @@ struct TranscriptionSettings: View {
         testing = true; micResult = "Listening… speak now"
         Task {
             if MicrophoneSource.authorization == .notDetermined { _ = await MicrophoneSource.requestAccess(); services.windows.refocusAfterSystemPrompt() }
-            let r = await SourceTest.run(.microphone, microphoneUID: settings.microphoneUID, excludeOwnPlayback: true)
+            let r = await SourceTest.run(.microphone, microphoneUID: settings.microphoneUID)
             testing = false
             if let e = r.error { micResult = e == .microphoneDenied ? "Microphone access is off (System Settings › Privacy & Security › Microphone)." : "Could not start: \(e)"; return }
             settings.microphoneTested = r.heardSignal
@@ -811,7 +809,7 @@ struct TranscriptionSettings: View {
         testing = true; sysResult = "Playing test sound…"
         Task {
             // Our own playback is included only for this test so the test sound can be heard.
-            let r = await SourceTest.run(.system, microphoneUID: nil, seconds: 3, excludeOwnPlayback: false, during: {
+            let r = await SourceTest.run(.system, microphoneUID: nil, seconds: 3, during: {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { NSSound(named: "Submarine")?.play() }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { NSSound(named: "Glass")?.play() }
             })

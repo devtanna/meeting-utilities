@@ -21,33 +21,50 @@ public struct CaptureConfiguration: Sendable {
     public var sessionID: UUID
     public var sources: [CaptureSource]
     public var microphoneDeviceUID: String?
-    public var voiceProcessing: Bool
-    public var excludeOwnPlayback: Bool
-    public var vad: VADParameters
-    public init(sessionID: UUID, sources: [CaptureSource], microphoneDeviceUID: String?, voiceProcessing: Bool = false,
-                excludeOwnPlayback: Bool = true, vad: VADParameters = VADParameters()) {
-        self.sessionID = sessionID; self.sources = sources; self.microphoneDeviceUID = microphoneDeviceUID
-        self.voiceProcessing = voiceProcessing; self.excludeOwnPlayback = excludeOwnPlayback; self.vad = vad
+    public var speech: SpeechParameters
+    public init(sessionID: UUID, sources: [CaptureSource], microphoneDeviceUID: String?, speech: SpeechParameters = SpeechParameters()) {
+        self.sessionID = sessionID; self.sources = sources; self.microphoneDeviceUID = microphoneDeviceUID; self.speech = speech
     }
 }
 
-/// Owns live sources, a 10 Hz processing tick per session, conversion to 16 kHz mono, and VAD chunking.
+/// What one source actually delivered during a session; saved with the session so an empty transcript can say why.
+public struct SourceStats: Sendable, Codable, Equatable {
+    public var device: String = ""
+    public var audioSeconds: Double = 0
+    /// Loudest 100 ms of the raw signal, before any gain.
+    public var peakDB: Float = -120
+    public var utterances = 0
+    public var restarts = 0
+    public var stalls = 0
+    public var neuralVAD = false
+    public init() {}
+}
+
+/// Owns live sources and a 10 Hz processing tick. Per source, following Meetily's pipeline: mono at the device rate
+/// → (microphone only) 80 Hz high-pass and loudness normalization → 16 kHz → Silero speech segments.
 /// Audio never leaves memory (§13.6).
 public final class CaptureController: @unchecked Sendable {
     private struct Pipeline {
         var adapter: any AudioSourceAdapter
+        var enhancer: MicrophoneEnhancer?
         var resampler: StreamingResampler
-        var chunker: UtteranceChunker
+        var chunker: SpeechChunker
         var lastDropped = 0
+        var lastDataAt: Double
+        var stats = SourceStats()
     }
+
+    /// A running source that delivers nothing for this long is rebuilt.
+    static let stallSeconds = 3.0
 
     private let queue = DispatchQueue(label: "capture.processing", qos: .userInitiated)
     private var pipelines: [CaptureSource: Pipeline] = [:]
+    private var finishedStats: [CaptureSource: SourceStats] = [:]
+    private var pendingRebuild: Set<CaptureSource> = []
     private var timer: DispatchSourceTimer?
     private var continuation: AsyncStream<CaptureEvent>.Continuation?
     private var configuration: CaptureConfiguration?
     private var deviceObservers: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
-    private var engineObserver: NSObjectProtocol?
     public let budget: AudioBudget
     public private(set) var originHostTime: Double = 0
 
@@ -59,19 +76,16 @@ public final class CaptureController: @unchecked Sendable {
     /// so the caller can offer an explicitly labelled single-source session instead (§13.3).
     public func start(_ config: CaptureConfiguration) throws -> AsyncStream<CaptureEvent> {
         stop()
+        queue.sync { finishedStats = [:]; pendingRebuild = [] }
         let (stream, cont) = AsyncStream<CaptureEvent>.makeStream(bufferingPolicy: .bufferingNewest(256))
         var started: [CaptureSource: Pipeline] = [:]
         do {
             for source in config.sources {
-                let adapter: any AudioSourceAdapter
                 do {
-                    adapter = try makeAdapter(source, config)
-                    try adapter.start()
+                    started[source] = try makePipeline(source, config)
                 } catch let e as CaptureSourceError {
                     throw CaptureStartFailure(source: source, error: e)
                 }
-                started[source] = Pipeline(adapter: adapter, resampler: StreamingResampler(inputRate: adapter.nativeSampleRate),
-                                           chunker: UtteranceChunker(params: config.vad))
             }
         } catch {
             for p in started.values { p.adapter.stop() }
@@ -101,9 +115,12 @@ public final class CaptureController: @unchecked Sendable {
             timer?.cancel(); timer = nil
             for source in CaptureSource.allCases.reversed() {
                 guard var p = pipelines[source] else { continue }
+                p.adapter.onDeviceChange = nil
                 p.adapter.stop()
                 drain(source, &p)
-                if let u = p.chunker.flush() { continuation?.yield(.utterance(source, u)) }
+                if let u = p.chunker.flush() { p.stats.utterances += 1; continuation?.yield(.utterance(source, u)) }
+                finishedStats[source] = p.stats
+                Log.capture.info("capture source \(source.rawValue, privacy: .public) stats audio=\(p.stats.audioSeconds, privacy: .public)s peak=\(p.stats.peakDB, privacy: .public)dB utterances=\(p.stats.utterances, privacy: .public) restarts=\(p.stats.restarts, privacy: .public) stalls=\(p.stats.stalls, privacy: .public) silero=\(p.stats.neuralVAD, privacy: .public)")
             }
             pipelines.removeAll()
             budget.set("rings", bytes: 0)
@@ -112,39 +129,63 @@ public final class CaptureController: @unchecked Sendable {
         }
     }
 
-    private func makeAdapter(_ source: CaptureSource, _ config: CaptureConfiguration) throws -> any AudioSourceAdapter {
+    /// Per-source stats: live while running, final after stop.
+    public func stats() -> [CaptureSource: SourceStats] {
+        queue.sync { finishedStats.merging(pipelines.mapValues(\.stats)) { _, live in live } }
+    }
+
+    private func makePipeline(_ source: CaptureSource, _ config: CaptureConfiguration) throws -> Pipeline {
+        var adapter: any AudioSourceAdapter
         switch source {
         case .microphone:
             let id = config.microphoneDeviceUID.flatMap { AudioDevices.device(uid: $0) }
-            return MicrophoneSource(deviceID: id, voiceProcessing: config.voiceProcessing, ringSeconds: 10)
+            adapter = MicrophoneSource(deviceID: id, ringSeconds: 10)
         case .system:
-            if #available(macOS 14.2, *) { return SystemAudioSource(excludeOwnProcess: config.excludeOwnPlayback, ringSeconds: 10) }
-            throw CaptureSourceError.tapUnsupported
+            guard #available(macOS 14.2, *) else { throw CaptureSourceError.tapUnsupported }
+            adapter = SystemAudioSource(ringSeconds: 10)
         }
+        adapter.onDeviceChange = { [weak self] in self?.scheduleRebuild(source, reason: "device format changed") }
+        try adapter.start()
+        var p = Pipeline(adapter: adapter, enhancer: source == .microphone ? MicrophoneEnhancer(sampleRate: adapter.nativeSampleRate) : nil,
+                         resampler: StreamingResampler(inputRate: adapter.nativeSampleRate), chunker: SpeechChunker.make(config.speech), lastDataAt: HostTime.now())
+        p.stats.device = adapter.deviceName
+        p.stats.neuralVAD = p.chunker.isNeural
+        return p
     }
 
     private func tick() {
         var ringBytes = 0
+        let now = HostTime.now()
         for source in Array(pipelines.keys) {
             guard var p = pipelines[source] else { continue }
             drain(source, &p)
             ringBytes += p.adapter.ring.byteFootprint + p.chunker.bufferedSamples * 4
             pipelines[source] = p
+            // Back off (3, 6, 12, 24, 48 s) so a source that never delivers is not rebuilt in a tight loop.
+            if now - p.lastDataAt > Self.stallSeconds * Double(1 << min(p.stats.stalls, 4)) {
+                pipelines[source]?.stats.stalls += 1
+                rebuild(source, reason: "no audio for \(Int(now - p.lastDataAt))s")
+            }
         }
         budget.set("rings", bytes: ringBytes)
     }
 
     private func drain(_ source: CaptureSource, _ p: inout Pipeline) {
-        let (raw, t) = p.adapter.ring.drain(maxCount: p.adapter.ring.capacity, sampleRate: p.adapter.nativeSampleRate)
+        var (raw, t) = p.adapter.ring.drain(maxCount: p.adapter.ring.capacity, sampleRate: p.adapter.nativeSampleRate)
         let dropped = p.adapter.ring.droppedSamples.load(ordering: .relaxed)
         if dropped > p.lastDropped {
             continuation?.yield(.sourceDropped(source, droppedSeconds: Double(dropped - p.lastDropped) / p.adapter.nativeSampleRate, at: t))
             p.lastDropped = dropped
         }
         guard !raw.isEmpty else { return }
+        p.lastDataAt = HostTime.now()
+        p.stats.audioSeconds += Double(raw.count) / p.adapter.nativeSampleRate
+        p.stats.peakDB = max(p.stats.peakDB, Downmix.rmsDBFS(raw[...]))
+        p.enhancer?.process(&raw)
         let converted = p.resampler.process(raw)
         continuation?.yield(.level(source, Downmix.rmsDBFS(converted[...])))
         for u in p.chunker.append(converted, hostTime: t - p.resampler.latencySeconds) {
+            p.stats.utterances += 1
             continuation?.yield(.utterance(source, u))
         }
     }
@@ -154,15 +195,10 @@ public final class CaptureController: @unchecked Sendable {
     private func observeDevices() {
         deviceObservers = AudioDevices.observeChanges(queue: queue) { [weak self] sel in
             guard let self else { return }
-            if sel == kAudioHardwarePropertyDefaultOutputDevice { self.rebuild(.system) }
-            if sel == kAudioHardwarePropertyDefaultInputDevice, self.configuration?.microphoneDeviceUID == nil { self.rebuild(.microphone) }
+            if sel == kAudioHardwarePropertyDefaultOutputDevice { self.scheduleRebuild(.system, reason: "default output changed") }
+            if sel == kAudioHardwarePropertyDefaultInputDevice, self.configuration?.microphoneDeviceUID == nil { self.scheduleRebuild(.microphone, reason: "default input changed") }
             if sel == kAudioHardwarePropertyDevices, let uid = self.configuration?.microphoneDeviceUID, AudioDevices.device(uid: uid) == nil {
                 self.continuation?.yield(.sourceFailed(.microphone, .noInputDevice))
-            }
-        }
-        if let mic = queue.sync(execute: { pipelines[.microphone]?.adapter as? MicrophoneSource }) {
-            engineObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: mic.configurationChangeNotificationObject, queue: nil) { [weak self] _ in
-                self?.queue.async { self?.rebuild(.microphone) }
             }
         }
     }
@@ -170,28 +206,41 @@ public final class CaptureController: @unchecked Sendable {
     private func removeDeviceObservers() {
         AudioDevices.removeObservers(deviceObservers, queue: queue)
         deviceObservers = []
-        if let engineObserver { NotificationCenter.default.removeObserver(engineObserver) }
-        engineObserver = nil
+    }
+
+    /// Device notifications arrive in bursts; rebuild once after they settle.
+    private func scheduleRebuild(_ source: CaptureSource, reason: String) {
+        queue.async { [weak self] in
+            guard let self, self.pipelines[source] != nil, !self.pendingRebuild.contains(source) else { return }
+            self.pendingRebuild.insert(source)
+            self.queue.asyncAfter(deadline: .now() + .milliseconds(300)) { [weak self] in
+                guard let self else { return }
+                self.pendingRebuild.remove(source)
+                self.rebuild(source, reason: reason)
+            }
+        }
     }
 
     /// Must run on `queue`.
-    private func rebuild(_ source: CaptureSource) {
+    private func rebuild(_ source: CaptureSource, reason: String) {
         guard let config = configuration, var p = pipelines[source] else { return }
+        Log.capture.info("rebuilding \(source.rawValue, privacy: .public): \(reason, privacy: .public)")
+        p.adapter.onDeviceChange = nil
         p.adapter.stop()
         drain(source, &p)
-        if let u = p.chunker.flush() { continuation?.yield(.utterance(source, u)) }
+        if let u = p.chunker.flush() { p.stats.utterances += 1; continuation?.yield(.utterance(source, u)) }
         do {
-            let adapter = try makeAdapter(source, config)
-            try adapter.start()
-            pipelines[source] = Pipeline(adapter: adapter, resampler: StreamingResampler(inputRate: adapter.nativeSampleRate), chunker: UtteranceChunker(params: config.vad))
+            var next = try makePipeline(source, config)
+            let device = next.stats.device
+            next.stats = p.stats
+            next.stats.device = device
+            next.stats.restarts += 1
+            pipelines[source] = next
             continuation?.yield(.sourceRestarted(source))
-            Log.capture.info("capture source rebuilt \(source.rawValue, privacy: .public)")
-        } catch let e as CaptureSourceError {
-            pipelines.removeValue(forKey: source)
-            continuation?.yield(.sourceFailed(source, e))
         } catch {
+            finishedStats[source] = p.stats
             pipelines.removeValue(forKey: source)
-            continuation?.yield(.sourceFailed(source, .engineStartFailed("rebuild")))
+            continuation?.yield(.sourceFailed(source, error as? CaptureSourceError ?? .engineStartFailed("rebuild")))
         }
     }
 }
@@ -200,30 +249,23 @@ public final class CaptureController: @unchecked Sendable {
 public enum SourceTest {
     public struct Result: Sendable { public var peakDB: Float; public var heardSignal: Bool; public var error: CaptureSourceError? }
 
-    public static func run(_ source: CaptureSource, microphoneUID: String?, seconds: Double = 3, excludeOwnPlayback: Bool,
-                           during: (@Sendable () -> Void)? = nil) async -> Result {
+    public static func run(_ source: CaptureSource, microphoneUID: String?, seconds: Double = 3, during: (@Sendable () -> Void)? = nil) async -> Result {
         let controller = CaptureController()
-        let config = CaptureConfiguration(sessionID: UUID(), sources: [source], microphoneDeviceUID: microphoneUID, excludeOwnPlayback: excludeOwnPlayback)
+        let config = CaptureConfiguration(sessionID: UUID(), sources: [source], microphoneDeviceUID: microphoneUID)
         let stream: AsyncStream<CaptureEvent>
         do { stream = try controller.start(config) } catch let e as CaptureStartFailure {
             return Result(peakDB: -120, heardSignal: false, error: e.error)
         } catch { return Result(peakDB: -120, heardSignal: false, error: .engineStartFailed("unknown")) }
         during?()
-        let peak = await withTaskGroup(of: Float?.self) { group -> Float in
-            group.addTask {
-                var peak: Float = -120
-                for await e in stream { if case .level(_, let db) = e { peak = max(peak, db) } }
-                return peak
-            }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { for await _ in stream {} }
             group.addTask {
                 try? await Task.sleep(for: .seconds(seconds))
                 controller.stop()
-                return nil
             }
-            var result: Float = -120
-            for await v in group { if let v { result = v } }
-            return result
         }
+        // Judge the raw signal: the microphone's normalizer would make any noise look loud.
+        let peak = controller.stats()[source]?.peakDB ?? -120
         return Result(peakDB: peak, heardSignal: peak > -50, error: nil)
     }
 }

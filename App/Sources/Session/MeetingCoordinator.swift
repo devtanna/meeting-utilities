@@ -65,6 +65,8 @@ final class MeetingCoordinator: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var memorySource: DispatchSourceMemoryPressure?
     private var generation = 0
+    /// Per-source recognizer outcomes for the running session, saved with it as diagnostics.
+    private var recognition: [CaptureSource: RecognitionCounts] = [:]
 
     init(store: MeetingStore, calendar: CalendarEngine, settings: AppSettings, opener: LinkOpener, focus: FocusController,
          models: ModelManager, client: InferenceClient) {
@@ -196,6 +198,7 @@ final class MeetingCoordinator: ObservableObject {
         }
         generation += 1
         let gen = generation
+        recognition = [:]
         active = ActiveSessionState(sessionID: record.id, occurrenceID: occurrenceID, notebookID: notebookID, title: title, capture: .preflight,
                                     transcription: .ready, deadline: SessionDeadline(calendarDeadline: calendarEnd), sources: sources, mode: mode)
         do {
@@ -206,8 +209,7 @@ final class MeetingCoordinator: ObservableObject {
             models.setInUse(.speechToText, true)
             _ = try await client.load(kind: .speech, modelID: speech.id, revision: speech.artifactRevision, directory: dir)
             guard gen == generation else { return }
-            let stream = try capture.start(CaptureConfiguration(sessionID: record.id, sources: sources, microphoneDeviceUID: settings.microphoneUID,
-                                                                voiceProcessing: settings.voiceProcessing))
+            let stream = try capture.start(CaptureConfiguration(sessionID: record.id, sources: sources, microphoneDeviceUID: settings.microphoneUID))
             try await store.transition(sessionID: record.id, to: .capturing)
             update { $0.capture = .capturing; $0.transcription = .processingChunks; $0.startedAt = Date(); $0.message = nil }
             Log.capture.info("capture running session=\(record.id, privacy: .public)")
@@ -303,6 +305,7 @@ final class MeetingCoordinator: ObservableObject {
         capture.stop()                         // flushes in-progress speech into the stream, then finishes it
         if !interrupted { await pumpTask?.value } else { pumpTask?.cancel(); await client.cancel(jobID: nil, sessionID: a.sessionID) }
         pumpTask = nil
+        await saveDiagnostics(sessionID: a.sessionID)
         try? await store.transition(sessionID: a.sessionID, to: interrupted ? .interrupted : .stopped, reason: reason)
         if interrupted { try? await store.transition(sessionID: a.sessionID, to: .stopped, reason: reason) }
         models.setInUse(.speechToText, false)
@@ -351,6 +354,38 @@ final class MeetingCoordinator: ObservableObject {
 
     // MARK: - Transcription pump
 
+    struct RecognitionCounts: Codable { var sent = 0, recognized = 0, empty = 0, failed = 0 }
+
+    /// What each source delivered and what the recognizer made of it (§21 diagnostics; no audio or text).
+    struct SessionDiagnostics: Codable {
+        var sources: [String: Entry]
+        struct Entry: Codable {
+            var device: String
+            var audioSeconds: Double
+            var peakDB: Float
+            var utterances: Int
+            var restarts: Int
+            var stalls: Int
+            var recognized: Int
+            var empty: Int
+            var failed: Int
+        }
+    }
+
+    private func saveDiagnostics(sessionID: UUID) async {
+        let stats = capture.stats()
+        var entries: [String: SessionDiagnostics.Entry] = [:]
+        for (source, s) in stats {
+            let r = recognition[source] ?? RecognitionCounts()
+            entries[source.rawValue] = .init(device: s.device, audioSeconds: (s.audioSeconds * 10).rounded() / 10, peakDB: (s.peakDB * 10).rounded() / 10,
+                                             utterances: s.utterances, restarts: s.restarts, stalls: s.stalls,
+                                             recognized: r.recognized, empty: r.empty, failed: r.failed)
+            Log.capture.info("session \(source.rawValue, privacy: .public) sent=\(r.sent, privacy: .public) recognized=\(r.recognized, privacy: .public) empty=\(r.empty, privacy: .public) failed=\(r.failed, privacy: .public)")
+        }
+        guard let data = try? JSONEncoder().encode(SessionDiagnostics(sources: entries)), let json = String(data: data, encoding: .utf8) else { return }
+        try? await store.setCoverage(sessionID: sessionID, json: json)
+    }
+
     private struct Pending { var source: CaptureSource; var utterance: Utterance; var bytes: Int }
 
     private func runPump(stream: AsyncStream<CaptureEvent>, sessionID: UUID, occurrenceID: UUID, notebookID: UUID, generation gen: Int) {
@@ -362,7 +397,7 @@ final class MeetingCoordinator: ObservableObject {
             var inFlight: [CaptureSource: Task<Void, Never>] = [:]
             var sequence: [CaptureSource: Int] = [:]
             var lastText: [CaptureSource: (text: String, end: Double, forced: Bool)] = [:]
-            var lastLevel = Date.distantPast
+            var lastLevel: [CaptureSource: Date] = [:]
             let maxBacklogSeconds = 60.0
 
             @MainActor func commitGap(_ source: CaptureSource, start: Double, end: Double) async {
@@ -384,11 +419,14 @@ final class MeetingCoordinator: ObservableObject {
                 inFlight[source] = Task { @MainActor in
                     defer { inFlight[source] = nil; budget.set("inflight-\(source.rawValue)", bytes: 0); dispatch(source) }
                     let startMs = max(0, Int((u.startHostTime - origin) * 1000)), endMs = max(startMs, Int((u.endHostTime - origin) * 1000))
+                    self?.recognition[source, default: .init()].sent += 1
                     do {
                         let r = try await client.transcribe(header: header, samples: u.samples)
                         // Reject late results from cancelled/replaced sessions (§4.3).
                         guard r.generation == gen, r.sessionID == sessionID, self?.generation == gen || self?.active == nil else { return }
                         guard r.ok else {
+                            self?.recognition[source, default: .init()].failed += 1
+                            Log.capture.error("transcribe failed source=\(source.rawValue, privacy: .public) code=\(r.errorCode ?? "", privacy: .public)")
                             // The chunk's audio is already gone; record a gap instead of pretending (§13.6).
                             let s = TranscriptSegmentRecord(sessionID: sessionID, source: source.rawValue, sequence: seq, kind: .gap, startOffsetMs: startMs, endOffsetMs: endMs, text: "")
                             _ = try? await store.commitSegment(s, occurrenceID: occurrenceID, notebookID: notebookID)
@@ -398,12 +436,15 @@ final class MeetingCoordinator: ObservableObject {
                         var text = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
                         if let prev = lastText[source], prev.forced, u.startHostTime < prev.end { text = OverlapDedupe.trimLeadingOverlap(previous: prev.text, next: text) }
                         lastText[source] = (r.text, u.endHostTime, u.forcedSplit)
-                        guard !text.isEmpty else { return }
+                        guard !text.isEmpty else { self?.recognition[source, default: .init()].empty += 1; return }
+                        self?.recognition[source, default: .init()].recognized += 1
                         let s = TranscriptSegmentRecord(sessionID: sessionID, source: source.rawValue, sequence: seq, kind: .speech, startOffsetMs: startMs, endOffsetMs: endMs, text: text)
                         if (try? await store.commitSegment(s, occurrenceID: occurrenceID, notebookID: notebookID)) == true {
                             self?.update { $0.segmentCount += 1; $0.lagSeconds = max(0, HostTime.now() - u.endHostTime) }
                         }
                     } catch {
+                        self?.recognition[source, default: .init()].failed += 1
+                        Log.capture.error("transcribe threw source=\(source.rawValue, privacy: .public) error=\(String(describing: error), privacy: .public)")
                         let s = TranscriptSegmentRecord(sessionID: sessionID, source: source.rawValue, sequence: seq, kind: .gap, startOffsetMs: startMs, endOffsetMs: endMs, text: "")
                         _ = try? await store.commitSegment(s, occurrenceID: occurrenceID, notebookID: notebookID)
                         self?.update { $0.gapCount += 1 }
@@ -426,8 +467,9 @@ final class MeetingCoordinator: ObservableObject {
                     budget.set("queue-\(source.rawValue)", bytes: queues[source]!.reduce(0) { $0 + $1.bytes })
                     dispatch(source)
                 case .level(let source, let db):
-                    if Date().timeIntervalSince(lastLevel) > 0.1 { // ≤10 Hz UI updates (§21.3)
-                        lastLevel = Date()
+                    // ≤10 Hz UI updates per source (§21.3); a shared throttle starved the second meter.
+                    if Date().timeIntervalSince(lastLevel[source] ?? .distantPast) > 0.1 {
+                        lastLevel[source] = Date()
                         self?.update { $0.levels[source] = db }
                     }
                 case .sourceDropped(let source, let secs, let at):
@@ -438,7 +480,7 @@ final class MeetingCoordinator: ObservableObject {
                     await commitGap(source, start: HostTime.now(), end: HostTime.now())
                     Task { await self?.stop(reason: .sourceLost) }
                 case .sourceRestarted(let source):
-                    self?.update { $0.message = "\(source.label) device changed; capture continued." }
+                    self?.update { $0.message = "\(source == .microphone ? "Microphone" : "System audio") restarted after a device change; capture continued." }
                 }
             }
             // Drain: wait for in-flight chunks, then process what is queued (captured audio only).

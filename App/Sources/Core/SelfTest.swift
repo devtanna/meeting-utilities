@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import InferenceProtocol
+import MeetingAudio
 import MeetingCore
 
 /// `-SelfTest <report.json> [-SelfTestPCM <fixture.pcm>] [-SelfTestDownload YES]`
@@ -19,6 +20,11 @@ enum SelfTest {
                 record("ping", "protocol=\(p.protocolVersion) probe=\(p.mlxProbe ?? "nil") pid=\(p.processID)")
                 record("service_pid_differs_from_host", "\(p.processID != getpid())")
             } catch { record("ping", "FAILED \(error)") }
+
+            // Silero VAD ships inside the app (MeetingAudio resource bundle) and must load from there.
+            if let vad = try? SileroVADModel(), let p = try? vad.probability([Float](repeating: 0, count: SileroVADModel.frameSize)[...]) {
+                record("silero_vad", String(format: "loaded silence_p=%.3f", p))
+            } else { record("silero_vad", "FAILED") }
 
             if UserDefaults.standard.bool(forKey: "SelfTestDownload") {
                 for m in s.models.catalog.models where !s.models.isReady(m.purpose) {

@@ -38,10 +38,21 @@ covered by the notices inside those packages.
 |---|---|---|---|
 | MeetingBar | 93a0071b826c | Apache-2.0 | Provider link detection and EventKit adapter design ideas. No code was copied; if code is adapted later, its notice must be added here. |
 | Itsycal | master | MIT | Compact month navigation ideas. |
-| Meetily | 07c4dfd45361 | MIT | Capture/source separation ideas and the duplicate-system-audio regression case. |
 | Mica | 88428bec5896 | — | Counter-example: unconditional Focus off is deliberately NOT implemented. |
 | Boring Notch | main | GPL-3.0 | Behavior reference only. No code copied. |
 | AudioCap | 6f609e8ad1b1 | BSD-2-Clause | Core Audio tap setup reference. Private TCC APIs are excluded. |
+
+## Adapted code
+
+| Project | Revision | License | What was adapted |
+|---|---|---|---|
+| Meetily (Zackriya Solutions) | 07c4dfd | MIT, Copyright (c) 2024 Zackriya Solutions | The capture pipeline was ported to Swift from its Rust sources (`audio/capture/core_audio.rs`, `audio/pipeline.rs`, `audio/audio_processing.rs`, `audio/vad.rs`): the mono global process tap in a private aggregate clocked by the output device, first-two-channel microphone downmix, 80 Hz high-pass, EBU R128 loudness normalization to -23 LUFS with a 10 ms look-ahead limiter, and the Silero VAD thresholds and timing. See `Packages/MeetingKit/Sources/MeetingAudio/MicProcessing.swift`, `SileroVAD.swift` and `Sources.swift`. |
+
+## Models shipped in the app
+
+| Model | Revision | License | Attribution |
+|---|---|---|---|
+| Silero VAD v6.0.0, Core ML (`silero-vad-unified-v6.0.0.mlmodelc`, bundled as `silero-vad.mlmodelc`) | FluidInference/silero-vad-coreml b419383c55c1 | MIT | Silero VAD by the Silero Team (https://github.com/snakers4/silero-vad); Core ML conversion by FluidInference (https://huggingface.co/FluidInference/silero-vad-coreml). |
 
 ## Models (downloaded only on request; not shipped in the app)
 

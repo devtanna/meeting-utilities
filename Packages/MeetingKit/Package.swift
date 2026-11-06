@@ -21,7 +21,7 @@ let package = Package(
             "MeetingCore",
             .product(name: "GRDB", package: "GRDB.swift"),
         ]),
-        .target(name: "MeetingAudio", dependencies: ["MeetingCore"]),
+        .target(name: "MeetingAudio", dependencies: ["MeetingCore"], resources: [.copy("Resources/silero-vad.mlmodelc")]),
         .testTarget(name: "MeetingCoreTests", dependencies: ["MeetingCore"]),
         .testTarget(name: "MeetingDataTests", dependencies: ["MeetingData", "MeetingCore"]),
         .testTarget(name: "MeetingAudioTests", dependencies: ["MeetingAudio", "MeetingCore", "InferenceProtocol"]),
