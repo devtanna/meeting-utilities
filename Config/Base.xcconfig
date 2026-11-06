@@ -2,8 +2,8 @@
 MU_PRODUCT_NAME = MeetingUtility
 MU_BUNDLE_ID = com.devtanna.meetingutils
 // Version: bumped by `make publish` (scripts/publish.sh). Keep it here, not in Identity.xcconfig.
-MU_VERSION = 1.0.5
-MU_BUILD = 6
+MU_VERSION = 1.0.6
+MU_BUILD = 7
 MU_TEAM_ID =
 MU_SPARKLE_FEED_URL = https:/$()/updates.example.invalid/meetingutility/appcast.xml
 MU_SPARKLE_PUBLIC_KEY =
