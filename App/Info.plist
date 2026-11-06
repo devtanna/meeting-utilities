@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key><string>en</string>
+	<key>CFBundleDisplayName</key><string>Meeting Utility</string>
+	<key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+	<key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleIconName</key><string>AppIcon</string>
+	<key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key><string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>LSUIElement</key><true/>
+	<key>LSArchitecturePriority</key><array><string>arm64</string></array>
+	<key>NSHumanReadableCopyright</key><string>Copyright © 2026 The Meeting Utility authors. MIT License.</string>
+	<key>NSPrincipalClass</key><string>NSApplication</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Meeting Utility reads your selected calendars to show your agenda, meeting links and reminders. macOS calls this "full access", but the app never creates, edits or deletes calendar events.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Meeting Utility reads your selected calendars to show your agenda. It never changes your events.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Meeting Utility transcribes your side of a meeting on this Mac when you turn on transcription. Audio is never saved.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Meeting Utility transcribes what other participants say by listening to this Mac's sound output while transcription is on. Audio is never saved.</string>
+	<key>SUFeedURL</key><string>$(MU_SPARKLE_FEED_URL)</string>
+	<key>SUPublicEDKey</key><string>$(MU_SPARKLE_PUBLIC_KEY)</string>
+	<key>SUEnableSystemProfiling</key><false/>
+	<key>SUEnableInstallerLauncherService</key><false/>
+	<key>SUAllowsAutomaticUpdates</key><true/>
+</dict>
+</plist>

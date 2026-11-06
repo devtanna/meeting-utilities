@@ -1,0 +1,84 @@
+name: MeetingUtility
+options:
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: true
+configFiles:
+  Debug: Config/Debug.xcconfig
+  Release: Config/Release.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+packages:
+  MeetingKit:
+    path: Packages/MeetingKit
+  InferenceEngines:
+    path: Packages/InferenceEngines
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.1
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    exactVersion: 3.1.0
+targets:
+  MeetingUtility:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Sources
+      - path: App/Resources
+      - path: Shortcuts
+        buildPhase: resources
+        includes: ["*.md", "*.shortcut"]
+      - path: THIRD_PARTY_NOTICES.md
+        buildPhase: resources
+      - path: LICENSE
+        buildPhase: resources
+    dependencies:
+      - package: MeetingKit
+        products: [MeetingCore, MeetingData, MeetingAudio, InferenceProtocol]
+      - package: Sparkle
+        product: Sparkle
+      - package: KeyboardShortcuts
+        product: KeyboardShortcuts
+      - target: InferenceService
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MU_BUNDLE_ID)
+        CODE_SIGN_ENTITLEMENTS: App/MeetingUtility.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_FILE: App/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+  InferenceService:
+    type: xpc-service
+    platform: macOS
+    sources:
+      - path: InferenceService
+    dependencies:
+      - package: InferenceEngines
+        product: InferenceEngines
+      - package: MeetingKit
+        products: [InferenceProtocol]
+    settings:
+      base:
+        PRODUCT_NAME: InferenceService
+        PRODUCT_BUNDLE_IDENTIFIER: $(MU_BUNDLE_ID).InferenceService
+        INFOPLIST_FILE: InferenceService/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: InferenceService/InferenceService.entitlements
+        SKIP_INSTALL: YES
+schemes:
+  MeetingUtility:
+    build:
+      targets:
+        MeetingUtility: all
+        InferenceService: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,16 @@
+.DS_Store
+DerivedData/
+build/
+dist/
+.build/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+Config/Identity.xcconfig
+Models/
+*.safetensors
+*.dmg
+
+# Private planning docs (kept local, never published)
+plan.md
+spec/

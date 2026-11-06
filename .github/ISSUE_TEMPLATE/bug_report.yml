@@ -1,0 +1,46 @@
+name: Bug report
+description: Something isn't working as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the agenda
+        2. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Settings › About
+      placeholder: 1.0.0 (42)
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac model
+      placeholder: macOS 15.4, MacBook Air M2 16 GB
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Presentation
+      options: [Menu bar, Notch, Not relevant]
+  - type: textarea
+    id: report
+    attributes:
+      label: Support report
+      description: Settings › Diagnostics › Preview Support Report. It is redacted, but please check it before posting.
+      render: text

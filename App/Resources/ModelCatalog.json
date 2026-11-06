@@ -1,0 +1,123 @@
+{
+  "catalogSchemaVersion": 1,
+  "models": [
+    {
+      "catalogSchemaVersion": 1,
+      "id": "parakeet-en-v2",
+      "displayName": "Parakeet TDT 0.6B v2 (English speech)",
+      "purpose": "speechToText",
+      "upstreamRepository": "nvidia/parakeet-tdt-0.6b-v2",
+      "artifactRepository": "mlx-community/parakeet-tdt-0.6b-v2",
+      "artifactRevision": "8ae155301e23d820d82aa60d24817c900e69e487",
+      "runtime": "mlxAudioSTT",
+      "format": "safetensors",
+      "languages": [
+        "en"
+      ],
+      "licenseSPDX": "CC-BY-4.0",
+      "attribution": "Parakeet TDT 0.6B v2 by NVIDIA (CC BY 4.0), converted to MLX by the mlx-community organization on Hugging Face.",
+      "minimumAppVersion": "1.0.0",
+      "files": [
+        {
+          "relativePath": "config.json",
+          "byteCount": 36176,
+          "sha256": "9bd323e60afe2615c983a5d9fc3a2c0470df2a03edf90c0f861bd59509d07264"
+        },
+        {
+          "relativePath": "model.safetensors",
+          "byteCount": 2471559904,
+          "sha256": "b958c37a6baa6874a279108755c8f2818e27bf647d72d54800a234a421341dfe"
+        },
+        {
+          "relativePath": "tokenizer.model",
+          "byteCount": 251396,
+          "sha256": "5a3a82c48998709f9bc9f5db2924d99a899d20bf82550ca52272da7c7557b0a0"
+        },
+        {
+          "relativePath": "tokenizer.vocab",
+          "byteCount": 10393,
+          "sha256": "dbe7ec6bd066c4526080940e1614e6582b9161515e856c2c39a1d49267c88cbc"
+        },
+        {
+          "relativePath": "vocab.txt",
+          "byteCount": 5066,
+          "sha256": "70b25deed256d79365a3c290d6191c31cc2315d952faf18d5c3a334f46e4866e"
+        }
+      ]
+    },
+    {
+      "catalogSchemaVersion": 1,
+      "id": "qwen3-4b-instruct-2507-4bit",
+      "displayName": "Qwen3 4B Instruct 2507, 4-bit (summaries)",
+      "purpose": "summary",
+      "upstreamRepository": "Qwen/Qwen3-4B-Instruct-2507",
+      "artifactRepository": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+      "artifactRevision": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b",
+      "runtime": "mlxLLM",
+      "format": "safetensors",
+      "languages": [
+        "en"
+      ],
+      "licenseSPDX": "Apache-2.0",
+      "attribution": "Qwen3-4B-Instruct-2507 by the Qwen team, Alibaba Cloud (Apache-2.0), 4-bit MLX conversion by the mlx-community organization on Hugging Face.",
+      "minimumAppVersion": "1.0.0",
+      "files": [
+        {
+          "relativePath": "added_tokens.json",
+          "byteCount": 707,
+          "sha256": "c0284b582e14987fbd3d5a2cb2bd139084371ed9acbae488829a1c900833c680"
+        },
+        {
+          "relativePath": "chat_template.jinja",
+          "byteCount": 4040,
+          "sha256": "40c21f34cf67d8c760ef72f8ad3ae5afad514299d4b06e91dd9a8d705af7b541"
+        },
+        {
+          "relativePath": "config.json",
+          "byteCount": 938,
+          "sha256": "574349e5a343236546fda55e4744a76e181f534182d7dc60ff1bad7e7a502849"
+        },
+        {
+          "relativePath": "generation_config.json",
+          "byteCount": 238,
+          "sha256": "835fffe355c9438e7a25be099b3fccaa98350b83451f9fd2d99512e74f1ade48"
+        },
+        {
+          "relativePath": "merges.txt",
+          "byteCount": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"
+        },
+        {
+          "relativePath": "model.safetensors",
+          "byteCount": 2263022417,
+          "sha256": "2a73c6c248601ab904e035548abd8e6abb65ea27dcb5f342fb0a8910eb44173f"
+        },
+        {
+          "relativePath": "model.safetensors.index.json",
+          "byteCount": 63964,
+          "sha256": "388d811b8b7c2608dd04cce1bcb04a8bf715d19b42790894e6d3427ff429a777"
+        },
+        {
+          "relativePath": "special_tokens_map.json",
+          "byteCount": 613,
+          "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd"
+        },
+        {
+          "relativePath": "tokenizer.json",
+          "byteCount": 11422654,
+          "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+        },
+        {
+          "relativePath": "tokenizer_config.json",
+          "byteCount": 5440,
+          "sha256": "4397cc477eb6d79715ccd2000accd6b3531928f30029665832fa1b255f24d2b9"
+        },
+        {
+          "relativePath": "vocab.json",
+          "byteCount": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        }
+      ]
+    }
+  ]
+}

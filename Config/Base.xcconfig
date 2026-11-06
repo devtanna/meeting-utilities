@@ -1,0 +1,27 @@
+// Defaults first; Identity.xcconfig (included last) may override any of these.
+MU_PRODUCT_NAME = MeetingUtility
+MU_BUNDLE_ID = com.devtanna.meetingutils
+MU_VERSION = 1.0.0
+MU_BUILD = 1
+MU_TEAM_ID =
+MU_SPARKLE_FEED_URL = https:/$()/updates.example.invalid/meetingutility/appcast.xml
+MU_SPARKLE_PUBLIC_KEY =
+
+PRODUCT_NAME = $(MU_PRODUCT_NAME)
+MARKETING_VERSION = $(MU_VERSION)
+CURRENT_PROJECT_VERSION = $(MU_BUILD)
+MACOSX_DEPLOYMENT_TARGET = 15.0
+ARCHS = arm64
+ONLY_ACTIVE_ARCH = NO
+SWIFT_VERSION = 6.0
+ENABLE_USER_SCRIPT_SANDBOXING = YES
+DEAD_CODE_STRIPPING = YES
+
+// Signing: ad-hoc by default. With an Apple Development team, Identity.xcconfig sets
+// CODE_SIGN_IDENTITY = Apple Development and ENABLE_HARDENED_RUNTIME = YES.
+CODE_SIGN_STYLE = Manual
+DEVELOPMENT_TEAM = $(MU_TEAM_ID)
+CODE_SIGN_IDENTITY = -
+ENABLE_HARDENED_RUNTIME = NO
+
+#include? "Identity.xcconfig"
