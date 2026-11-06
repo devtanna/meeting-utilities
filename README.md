@@ -46,9 +46,9 @@
 - **Quarter tracker.** Always know where the quarter stands: `Q4 37/92 · 56D to Q1`.
 
 <p align="center">
-  <img src="docs/images/agenda.png" height="380" alt="Agenda">
+  <img src="docs/images/screenshot-agenda.png" height="380" alt="Agenda">
   &nbsp;
-  <img src="docs/images/notebook.png" height="380" alt="Meeting notebook">
+  <img src="docs/images/screenshot-notebook.png" height="380" alt="Meeting notebook">
 </p>
 
 ## Privacy
