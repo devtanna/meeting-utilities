@@ -26,10 +26,6 @@
   <a href="docs/privacy.md">Privacy</a>
 </p>
 
-<p align="center">
-  <img src="docs/images/hero.jpg" width="820" alt="meetingutils joining a call from the notch, with a live local transcript">
-</p>
-
 ## Features
 
 - **Agenda in the menu bar or the notch.** Today and tomorrow at a glance, keyboard-driven (↑/↓, Return to join,

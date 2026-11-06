@@ -141,12 +141,12 @@ actor FakeCalendarRepository: CalendarRepository {
 
     struct F { var h: Int; var m: Int; var dur: Int; var title: String; var provider: String?; var recurring: Bool; var rsvp: RSVPStatus }
     static let fixture: [F] = [
-        F(h: 9, m: 45, dur: 15, title: "Daily | Search Funnel", provider: "zoom", recurring: true, rsvp: .accepted),
-        F(h: 10, m: 0, dur: 30, title: "Prep for on-call refresh session", provider: "meet", recurring: false, rsvp: .accepted),
-        F(h: 11, m: 0, dur: 30, title: "Monthly Platform Maintenance", provider: "teams", recurring: true, rsvp: .accepted),
-        F(h: 13, m: 0, dur: 60, title: "Hybrid Heroes Bi-Weekly Sync", provider: "zoom", recurring: true, rsvp: .tentative),
-        F(h: 15, m: 15, dur: 45, title: "Product & Tech Weekly", provider: "meet", recurring: true, rsvp: .accepted),
-        F(h: 16, m: 0, dur: 30, title: "Leasing AB Test Set Up", provider: nil, recurring: false, rsvp: .accepted),
-        F(h: 16, m: 30, dur: 30, title: "Post-incident review for SIM-0000 synthetic ticket with a long title", provider: "zoom", recurring: false, rsvp: .declined),
+        F(h: 9, m: 45, dur: 15, title: "Team Standup", provider: "zoom", recurring: true, rsvp: .accepted),
+        F(h: 10, m: 0, dur: 30, title: "Coffee chat with Sam", provider: "meet", recurring: false, rsvp: .accepted),
+        F(h: 11, m: 0, dur: 30, title: "Design Review", provider: "teams", recurring: true, rsvp: .accepted),
+        F(h: 13, m: 0, dur: 60, title: "Weekly Planning", provider: "zoom", recurring: true, rsvp: .tentative),
+        F(h: 15, m: 15, dur: 45, title: "Customer Feedback Sync", provider: "meet", recurring: true, rsvp: .accepted),
+        F(h: 16, m: 0, dur: 30, title: "Focus time", provider: nil, recurring: false, rsvp: .accepted),
+        F(h: 16, m: 30, dur: 30, title: "Quarterly kickoff: goals, roadmap and open questions for the next quarter", provider: "zoom", recurring: false, rsvp: .declined),
     ]
 }

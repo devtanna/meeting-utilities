@@ -25,15 +25,15 @@ enum SnapshotRenderer {
                 render(OnboardingView(services: services, initialStep: step, onFinish: {}), size: NSSize(width: 680, height: 640), appearance: .aqua, to: out.appendingPathComponent("onboarding-\(step).png"))
             }
             render(HistoryView(services: services), size: NSSize(width: 1040, height: 720), appearance: .aqua, to: out.appendingPathComponent("history.png"))
-            if let item = services.calendar.agendaItems.first(where: { $0.event.title.contains("Product") }) ?? services.calendar.agendaItems.first,
+            if let item = services.calendar.agendaItems.first(where: { $0.event.title.contains("Customer") }) ?? services.calendar.agendaItems.first,
                let r = services.calendar.resolvedOccurrence(for: item) {
                 let nb = NotebookViewModel(services: services)
                 await nb.open(occurrenceID: r.occurrence.id, resolved: r)
-                nb.occurrenceNotes.text = "## Agenda\n- Funnel conversion review\n- Launch checklist\n\nAlex to share the dashboard."
+                nb.occurrenceNotes.text = "## Agenda\n- Wins from last week\n- Customer feedback themes\n- Priorities for next week\n\nSam to send the recap."
                 render(NotebookView(model: nb, coordinator: services.coordinator, summaries: services.summaries), size: NSSize(width: 980, height: 700), appearance: .aqua, to: out.appendingPathComponent("notebook.png"))
                 let tt = TalktrackModel(services: services)
                 tt.title = item.event.title
-                tt.editor.text = "Good morning everyone.\n\nToday I want to walk through three things: where the search funnel stands, what we learned from last week's experiment, and what we'll ship next.\n\nFirst, conversion is up three percent week over week."
+                tt.editor.text = "Good morning everyone.\n\nToday I want to walk through three things: what customers told us this month, what we changed because of it, and what we'll try next.\n\nFirst, the most common request was a simpler setup."
                 render(TalktrackView(model: tt, settings: services.settings, onPin: { _ in }, onClose: {}), size: NSSize(width: 600, height: 380), appearance: .darkAqua, to: out.appendingPathComponent("talktrack.png"))
                 tt.editor.text = ""
             }

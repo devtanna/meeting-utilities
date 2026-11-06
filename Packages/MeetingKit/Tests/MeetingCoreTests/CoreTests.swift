@@ -468,8 +468,8 @@ struct AgendaTests {
         #expect(CountdownFormatter.format(minutes: 60) == "60m")
         #expect(CountdownFormatter.format(minutes: 61) == "1h")
         #expect(CountdownFormatter.format(minutes: 157) == "2h")   // 2h 37m
-        let i = item("LM Incident Refresher", "2026-11-05 12:37", "2026-11-05 13:00")
-        #expect(CountdownFormatter.statusTitle(item: i, now: date("2026-11-05 10:00"), length: .long) == "LM Incident Refresher • in 2h")
+        let i = item("Design Review", "2026-11-05 12:37", "2026-11-05 13:00")
+        #expect(CountdownFormatter.statusTitle(item: i, now: date("2026-11-05 10:00"), length: .long) == "Design Review • in 2h")
     }
 }
 
