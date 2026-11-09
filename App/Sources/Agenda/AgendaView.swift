@@ -432,6 +432,7 @@ struct AgendaRow: View {
 
     static let dismissHelp = "Dismiss: hide this meeting from the menu bar and silence its reminders and sounds, for this occurrence only. It stays in this list, and your calendar is unchanged."
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let e = item.event
@@ -464,18 +465,11 @@ struct AgendaRow: View {
     /// Eye toggle: always visible (crossed out) when dismissed, otherwise on hover or selection.
     @ViewBuilder var dismissToggle: some View {
         let show = item.isDismissed || hover || isSelected
-        Button(action: toggleDismissed) {
-            Image(systemName: item.isDismissed ? "eye.slash" : "eye")
-                .font(.system(size: 11))
-                .foregroundStyle(item.isDismissed ? .secondary : .tertiary)
-                .frame(width: 20, height: 20)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .opacity(show ? 1 : 0)
-        .allowsHitTesting(show)
-        .help(item.isDismissed ? "Undo dismiss: show in the menu bar again, with reminders and sounds" : Self.dismissHelp)
-        .accessibilityLabel(item.isDismissed ? "Undo dismiss" : "Dismiss")
+        DismissToggle(dismissed: item.isDismissed, shownColor: StatusSymbol.legible(item.event.calendarColor, dark: scheme == .dark), action: toggleDismissed)
+            .opacity(show ? 1 : 0)
+            .allowsHitTesting(show)
+            .help(item.isDismissed ? "Undo dismiss: show in the menu bar again, with reminders and sounds" : Self.dismissHelp)
+            .accessibilityLabel(item.isDismissed ? "Undo dismiss" : "Dismiss")
     }
 
     var timeRange: String {
@@ -499,6 +493,30 @@ struct AgendaRow: View {
         case .none: ""
         }
         return "\(timeRange), \(item.event.title), \(rsvp)\(item.primaryLink == nil ? ", no meeting link" : ", \(item.primaryLink!.provider.displayName)")\(item.isDismissed ? ", dismissed" : "")"
+    }
+}
+
+/// Eye in the row's calendar colour (same as its status circle) = shown in the menu bar; red crossed-out eye =
+/// dismissed. Hovering the button draws a rounded square around it so it reads as clickable.
+struct DismissToggle: View {
+    var dismissed: Bool
+    var shownColor: Color
+    var action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        let tint: Color = dismissed ? .red : shownColor
+        Button(action: action) {
+            Image(systemName: dismissed ? "eye.slash" : "eye")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 22, height: 20)
+                .background(hover ? tint.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(hover ? tint.opacity(0.7) : .clear, lineWidth: 1))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
     }
 }
 
