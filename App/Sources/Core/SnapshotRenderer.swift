@@ -17,7 +17,7 @@ enum SnapshotRenderer {
                 let suffix = appearance == .aqua ? "light" : "dark"
                 render(AgendaRoot(services: services, onClose: {}), size: NSSize(width: 430, height: 700), appearance: appearance, to: out.appendingPathComponent("agenda-\(suffix).png"))
             }
-            for tab in [SettingsTab.general, .calendars, .agenda, .sounds, .transcription, .models] {
+            for tab in [SettingsTab.general, .calendars, .agenda, .sounds, .transcription, .models, .stats] {
                 let st = SettingsTabState(); st.tab = tab
                 render(SettingsView(services: services, tabState: st), size: NSSize(width: 860, height: 680), appearance: .aqua, to: out.appendingPathComponent("settings-\(tab.rawValue).png"))
             }

@@ -130,6 +130,8 @@ final class MeetingCoordinator: ObservableObject {
             return false
         }
         setLink(occID, .openRequested)
+        // Settings › Stats. Fire-and-forget so the write never delays Focus or capture below.
+        Task.detached(priority: .utility) { [store] in try? await store.recordJoin(occurrenceID: occID) }
         // Success is silent; only failures and fallbacks need attention.
         banner = outcome == .appMissingUsedBrowser ? "The provider app isn't installed, so the link opened in your browser." : nil
         Log.opening.info("open requested source=\(source.rawValue, privacy: .public)")

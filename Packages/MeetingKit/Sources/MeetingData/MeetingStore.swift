@@ -507,6 +507,33 @@ public final class MeetingStore: Sendable {
         }
     }
 
+    // MARK: - Stats
+
+    /// Records that a meeting was opened through Join. Idempotent: rejoining the same meeting counts once.
+    public func recordJoin(occurrenceID: UUID, at date: Date = Date()) async throws {
+        try await pool.write { db in
+            try db.execute(sql: "INSERT OR IGNORE INTO meeting_joins(occurrence_id, first_joined_at_ms) VALUES (?, ?)",
+                           arguments: [occurrenceID.uuidString, date.ms])
+        }
+    }
+
+    /// Lifetime counts for Settings › Stats, in one read. Each counts meetings, not documents or sessions, using the same
+    /// rules as the history view (non-empty notes, transcripts with speech).
+    public func stats() async throws -> MeetingStats {
+        try await pool.read { db in
+            let r = try Row.fetchOne(db, sql: """
+                SELECT
+                  (SELECT COUNT(*) FROM meeting_joins) AS joined,
+                  (SELECT COUNT(DISTINCT occurrence_id) FROM documents
+                     WHERE kind = 'notes' AND occurrence_id IS NOT NULL AND body != '') AS notes,
+                  (SELECT COUNT(DISTINCT s.occurrence_id) FROM meeting_sessions s
+                     WHERE EXISTS (SELECT 1 FROM transcript_segments t WHERE t.session_id = s.id AND t.kind = 'speech')) AS transcripts,
+                  (SELECT COUNT(DISTINCT occurrence_id) FROM summary_versions) AS summaries
+                """)!
+            return MeetingStats(joined: r["joined"], withNotes: r["notes"], withTranscripts: r["transcripts"], withSummaries: r["summaries"])
+        }
+    }
+
     // MARK: - Deletion & erase (§9.3, §18.4)
 
     public func deleteOccurrenceContent(_ occurrenceID: UUID) async throws {

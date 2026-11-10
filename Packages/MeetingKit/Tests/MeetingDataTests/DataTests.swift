@@ -203,6 +203,53 @@ struct PersistenceTests {
         #expect(month.count == 1 && month[0].hasNotes && month[0].transcriptSegments == 0)
     }
 
+    @Test func statsCountMeetingsNotRows() async throws {
+        let a = try await store.resolve(event("A", local: "A", start: t0))
+        let b = try await store.resolve(event("B", local: "B", start: t0.addingTimeInterval(3600)))
+        let c = try await store.resolve(event("C", local: "C", start: t0.addingTimeInterval(7200)))
+        #expect(try await store.stats() == MeetingStats(joined: 0, withNotes: 0, withTranscripts: 0, withSummaries: 0))
+
+        // Joins: rejoining the same meeting counts once.
+        try await store.recordJoin(occurrenceID: a.occurrence.id)
+        try await store.recordJoin(occurrenceID: a.occurrence.id)
+        try await store.recordJoin(occurrenceID: b.occurrence.id)
+        // Notes: empty bodies and series notes don't count; several saves count once.
+        let ka = DocumentKey(scope: .occurrence(notebookID: a.notebook.id, occurrenceID: a.occurrence.id), kind: .notes)
+        let r = try await store.save(DocumentRevision(key: ka, baseRevision: 0, body: "n"))
+        _ = try await store.save(DocumentRevision(key: ka, baseRevision: r.revision, body: "n2"))
+        _ = try await store.save(DocumentRevision(key: DocumentKey(scope: .occurrence(notebookID: b.notebook.id, occurrenceID: b.occurrence.id), kind: .notes), baseRevision: 0, body: ""))
+        _ = try await store.save(DocumentRevision(key: DocumentKey(scope: .series(notebookID: c.notebook.id), kind: .notes), baseRevision: 0, body: "series"))
+        // Transcripts: two sessions on one meeting count once; a gap-only session doesn't count.
+        for occ in [a, a, c] {
+            let s = try await store.createSession(occurrenceID: occ.occurrence.id, mode: .transcript, calendarDeadline: t0, modelID: nil, modelRevision: nil)
+            let kind: SegmentKind = occ == c ? .gap : .speech
+            _ = try await store.commitSegment(TranscriptSegmentRecord(sessionID: s.id, source: "system", sequence: 1, kind: kind, startOffsetMs: 0, endOffsetMs: 1000, text: kind == .speech ? "hi" : ""), occurrenceID: occ.occurrence.id, notebookID: occ.notebook.id)
+            try await store.transition(sessionID: s.id, to: .stopped)
+        }
+        // Summaries: two versions on one meeting count once.
+        var summary = SummaryV1(); summary.overview = "x"
+        for occ in [b, b] {
+            try await store.insertSummary(SummaryVersionRecord(id: UUID(), occurrenceID: occ.occurrence.id, sourceSessionIDs: [], transcriptDigest: "d", modelID: "m", modelRevision: "r", promptVersion: "p", generationJSON: "{}", result: summary, userEdited: false, createdAt: t0), notebookID: occ.notebook.id)
+        }
+        #expect(try await store.stats() == MeetingStats(joined: 2, withNotes: 1, withTranscripts: 1, withSummaries: 1))
+    }
+
+    @Test func migrationSeedsJoinsFromAutoJoinLedger() async throws {
+        let a = try await store.resolve(event("A", local: "A", start: t0))
+        let b = try await store.resolve(event("B", local: "B", start: t0.addingTimeInterval(3600)))
+        try await store.pool.write { db in
+            try db.execute(sql: "DELETE FROM meeting_joins")
+            try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = 'v3-meeting-joins'")
+            try db.execute(sql: "DROP TABLE meeting_joins")
+        }
+        try await store.reserveAction(occurrenceID: a.occurrence.id, kind: .autoJoin, plannedAt: t0)
+        try await store.finishAction(occurrenceID: a.occurrence.id, kind: .autoJoin, state: .succeeded, resultCode: "open_requested")
+        try await store.reserveAction(occurrenceID: b.occurrence.id, kind: .autoJoin, plannedAt: t0)
+        try await store.finishAction(occurrenceID: b.occurrence.id, kind: .autoJoin, state: .failed, resultCode: "open_failed")
+        let reopened = MeetingStore(database: try AppDatabase(directory: store.db.directory))
+        #expect(try await reopened.stats().joined == 1)
+    }
+
     @Test func exportsIncludeGapsAndSources() async throws {
         let a = try await store.resolve(event("Exp", local: "A", start: t0))
         let s = try await store.createSession(occurrenceID: a.occurrence.id, mode: .transcript, calendarDeadline: t0, modelID: nil, modelRevision: nil)

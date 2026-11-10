@@ -9,7 +9,7 @@ public enum DatabaseOpenError: Error, Sendable {
 
 /// Owns the SQLite database: WAL, synchronous=FULL, user-only permissions, migrations, backups (§18).
 public final class AppDatabase: Sendable {
-    public static let schemaVersion = 2
+    public static let schemaVersion = 3
     public static let minimumCompatibleSchema = 1
 
     public let pool: DatabasePool
@@ -95,6 +95,9 @@ public final class AppDatabase: Sendable {
         }
         m.registerMigration("v2-repairs-and-meta") { db in
             try db.execute(sql: Schema.v2)
+        }
+        m.registerMigration("v3-meeting-joins") { db in
+            try db.execute(sql: Schema.v3)
         }
         return m
     }
@@ -274,6 +277,19 @@ enum Schema {
     );
     CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     INSERT INTO app_meta(key, value) VALUES ('schema_version', '2'), ('min_compatible_schema', '1');
+    """
+
+    /// Meetings opened through Join (one row per meeting, for Settings › Stats). Additive, so older apps can still open
+    /// the database (min_compatible_schema stays 1). Seeded from past successful automatic joins.
+    static let v3 = """
+    CREATE TABLE meeting_joins (
+        occurrence_id TEXT PRIMARY KEY REFERENCES occurrences(id) ON DELETE CASCADE,
+        first_joined_at_ms INTEGER NOT NULL
+    ) WITHOUT ROWID;
+    INSERT OR IGNORE INTO meeting_joins(occurrence_id, first_joined_at_ms)
+        SELECT occurrence_id, COALESCE(finished_at_ms, reserved_at_ms, planned_at_ms) FROM automatic_actions
+        WHERE kind = 'autoJoin' AND state = 'succeeded' AND result_code = 'open_requested';
+    UPDATE app_meta SET value = '3' WHERE key = 'schema_version';
     """
 }
 

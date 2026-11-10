@@ -109,6 +109,16 @@ public struct MeetingSessionRecord: Sendable, Equatable, Identifiable {
     public var coverageJSON: String
 }
 
+public struct MeetingStats: Sendable, Equatable {
+    public var joined: Int
+    public var withNotes: Int
+    public var withTranscripts: Int
+    public var withSummaries: Int
+    public init(joined: Int, withNotes: Int, withTranscripts: Int, withSummaries: Int) {
+        self.joined = joined; self.withNotes = withNotes; self.withTranscripts = withTranscripts; self.withSummaries = withSummaries
+    }
+}
+
 public enum SegmentKind: String, Sendable, Codable { case speech, gap }
 
 public struct TranscriptSegmentRecord: Sendable, Equatable, Identifiable {

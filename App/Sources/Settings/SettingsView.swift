@@ -8,7 +8,7 @@ import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general = "General", calendars = "Calendars", agenda = "Agenda", reminders = "Reminders", sounds = "Sounds", automation = "Auto Join",
-         focus = "Focus", transcription = "Transcription", models = "Models", data = "Data", updates = "Updates", diagnostics = "Diagnostics", about = "About"
+         focus = "Focus", transcription = "Transcription", models = "Models", stats = "Stats", data = "Data", updates = "Updates", diagnostics = "Diagnostics", about = "About"
     var id: String { rawValue }
 
     var icon: String {
@@ -22,6 +22,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .focus: "moon.fill"
         case .transcription: "waveform"
         case .models: "cpu.fill"
+        case .stats: "chart.bar.fill"
         case .data: "externaldrive.fill"
         case .updates: "arrow.down.circle.fill"
         case .diagnostics: "stethoscope"
@@ -40,6 +41,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .focus: .indigo
         case .transcription: .purple
         case .models: .teal
+        case .stats: .cyan
         case .data: .blue
         case .updates: Color(red: 0.2, green: 0.55, blue: 1)
         case .diagnostics: Color(white: 0.5)
@@ -58,6 +60,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .focus: "Turn on Do Not Disturb while you're in a meeting."
         case .transcription: "Transcribe meetings on this Mac. Audio is never saved."
         case .models: "Optional on-device models for transcripts and summaries."
+        case .stats: "How you've used Meeting Utility so far."
         case .data: "Where your notes live, backups, and erasing data."
         case .updates: "Keep Meeting Utility up to date."
         case .diagnostics: "Self-tests and a redacted support report."
@@ -77,6 +80,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .focus: "do not disturb dnd shortcut"
         case .transcription: "microphone system audio record transcript summary automatic test"
         case .models: "download parakeet qwen speech summary model disk"
+        case .stats: "statistics count counter numbers joined meetings notes transcripts transcriptions summaries usage"
         case .data: "erase delete backup export folder repair"
         case .updates: "sparkle version update"
         case .diagnostics: "support report self-test logs"
@@ -87,7 +91,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     static let groups: [[SettingsTab]] = [
         [.general, .calendars, .agenda, .reminders, .sounds, .automation, .focus],
         [.transcription, .models],
-        [.data, .updates, .diagnostics, .about],
+        [.stats, .data, .updates, .diagnostics, .about],
     ]
 }
 
@@ -240,6 +244,7 @@ struct SettingsView: View {
         case .focus: FocusSettings(services: services, settings: services.settings)
         case .transcription: TranscriptionSettings(services: services, settings: services.settings, models: services.models, tabState: tabState)
         case .models: ModelSettings(services: services, models: services.models)
+        case .stats: StatsSettings(store: services.store)
         case .data: DataSettings(services: services)
         case .updates: UpdateSettings(updates: services.updates, settings: services.settings)
         case .diagnostics: DiagnosticsSettings(services: services)
@@ -887,6 +892,47 @@ struct ModelSettings: View {
 }
 
 // MARK: - Data
+
+// MARK: - Stats
+
+/// Four lifetime counters, read in one query when the page opens; nothing is tracked or recomputed elsewhere.
+struct StatsSettings: View {
+    let store: MeetingStore
+    @State private var stats: MeetingStats?
+
+    var body: some View {
+        Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+            GridRow {
+                tile("Meetings joined", "arrow.up.right.video.fill", .green, stats?.joined)
+                tile("With notes", "note.text", .orange, stats?.withNotes)
+            }
+            GridRow {
+                tile("With transcripts", "waveform", .purple, stats?.withTranscripts)
+                tile("With summaries", "text.alignleft", .blue, stats?.withSummaries)
+            }
+        }
+        Footnote("Joins count meetings opened with Join, the shortcut, a reminder or Auto Join; rejoining the same meeting counts once. Notes, transcripts and summaries are counted from what's stored on this Mac, so deleting a meeting's content lowers them.")
+            .task { stats = try? await store.stats() }
+    }
+
+    func tile(_ title: String, _ symbol: String, _ color: Color, _ value: Int?) -> some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 10) {
+                IconTile(symbol: symbol, color: color, size: 24)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(value.map { $0.formatted() } ?? "–")
+                        .font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit()
+                        .contentTransition(.numericText())
+                    Text(title).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(14)
+        }
+        .animation(.snappy, value: value)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title): \(value.map { String($0) } ?? "loading")")
+    }
+}
 
 struct DataSettings: View {
     let services: AppServices
