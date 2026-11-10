@@ -362,6 +362,28 @@ final class MeetingCoordinator: ObservableObject {
         }
     }
 
+    /// Reloads the speech model into the (possibly restarted) service; concurrent callers share one load.
+    private var speechReload: Task<Bool, Never>?
+    func reloadSpeechModel() async -> Bool {
+        if let t = speechReload { return await t.value }
+        guard let speech = models.entry(.speechToText) else { return false }
+        let dir = models.installDirectory(speech)
+        let t = Task { @MainActor [client] () -> Bool in
+            do {
+                _ = try await client.load(kind: .speech, modelID: speech.id, revision: speech.artifactRevision, directory: dir)
+                Log.capture.info("speech model reloaded mid-session")
+                return true
+            } catch {
+                Log.capture.error("speech model reload failed: \(String(describing: error), privacy: .public)")
+                return false
+            }
+        }
+        speechReload = t
+        let ok = await t.value
+        speechReload = nil
+        return ok
+    }
+
     // MARK: - Transcription pump
 
     struct RecognitionCounts: Codable { var sent = 0, recognized = 0, empty = 0, failed = 0 }
@@ -421,17 +443,34 @@ final class MeetingCoordinator: ObservableObject {
             @MainActor func dispatch(_ source: CaptureSource) {
                 guard inFlight[source] == nil, var q = queues[source], !q.isEmpty else { return }
                 let item = q.removeFirst(); queues[source] = q
-                let seq = (sequence[source] ?? 0) + 1; sequence[source] = seq
                 let u = item.utterance
-                let header = ChunkHeader(sessionID: sessionID, jobID: sessionID, generation: gen, sequence: seq, source: source == .microphone ? .microphone : .system,
-                                         sampleRate: 16_000, frameCount: u.samples.count, hostTimeStartSeconds: u.startHostTime, hostTimeEndSeconds: u.endHostTime)
                 budget.set("inflight-\(source.rawValue)", bytes: item.bytes)
+                func nextSequence() -> Int { let n = (sequence[source] ?? 0) + 1; sequence[source] = n; return n }
+                func send(_ seq: Int) async throws -> ChunkResult {
+                    let header = ChunkHeader(sessionID: sessionID, jobID: sessionID, generation: gen, sequence: seq, source: source == .microphone ? .microphone : .system,
+                                             sampleRate: 16_000, frameCount: u.samples.count, hostTimeStartSeconds: u.startHostTime, hostTimeEndSeconds: u.endHostTime)
+                    return try await client.transcribe(header: header, samples: u.samples)
+                }
+                let firstSequence = nextSequence()
                 inFlight[source] = Task { @MainActor in
+                    var seq = firstSequence
                     defer { inFlight[source] = nil; budget.set("inflight-\(source.rawValue)", bytes: 0); dispatch(source) }
                     let startMs = max(0, Int((u.startHostTime - origin) * 1000)), endMs = max(startMs, Int((u.endHostTime - origin) * 1000))
                     self?.recognition[source, default: .init()].sent += 1
                     do {
-                        let r = try await client.transcribe(header: header, samples: u.samples)
+                        var r: ChunkResult
+                        do {
+                            r = try await send(seq)
+                        } catch {
+                            // The service died or the connection dropped; it comes back without a model.
+                            Log.capture.error("transcribe threw source=\(source.rawValue, privacy: .public) error=\(String(describing: error), privacy: .public); reloading")
+                            guard await self?.reloadSpeechModel() == true else { throw error }
+                            seq = nextSequence(); r = try await send(seq)
+                        }
+                        // The service unloads idle models; if that happened mid-session, reload and retry this chunk once.
+                        if !r.ok, r.errorCode == "model_not_loaded", await self?.reloadSpeechModel() == true {
+                            seq = nextSequence(); r = try await send(seq)
+                        }
                         // Reject late results from cancelled/replaced sessions (§4.3).
                         guard r.generation == gen, r.sessionID == sessionID, self?.generation == gen || self?.active == nil else { return }
                         guard r.ok else {
@@ -461,6 +500,18 @@ final class MeetingCoordinator: ObservableObject {
                     }
                 }
             }
+
+            // Keep the inference service and its speech model alive through quiet stretches: the service unloads models
+            // after 30 s idle and the client drops the connection after 30 s idle, which silently broke every chunk after
+            // the first long silence (e.g. a participant leaving and rejoining).
+            let keepAlive = Task { @MainActor in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(10))
+                    if Task.isCancelled { break }
+                    _ = try? await client.ping(probe: false)
+                }
+            }
+            defer { keepAlive.cancel() }
 
             for await event in stream {
                 switch event {
