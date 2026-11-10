@@ -136,7 +136,7 @@ struct NotebookView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        // Floating sidebar + page, matching Settings and Calendar and Notes (transparent 52 pt title band, no toolbar blur).
+        // Floating sidebar + page, matching Settings and the Calendar window (transparent 52 pt title band, no toolbar blur).
         HStack(spacing: 0) {
             sidebar
                 .frame(width: 250)

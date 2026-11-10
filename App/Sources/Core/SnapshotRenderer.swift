@@ -17,7 +17,7 @@ enum SnapshotRenderer {
                 let suffix = appearance == .aqua ? "light" : "dark"
                 render(AgendaRoot(services: services, onClose: {}), size: NSSize(width: 430, height: 700), appearance: appearance, to: out.appendingPathComponent("agenda-\(suffix).png"))
             }
-            for tab in [SettingsTab.general, .calendars, .agenda, .sounds, .transcription, .models, .stats] {
+            for tab in [SettingsTab.general, .calendars, .agenda, .reminders, .sounds, .automation, .focus, .transcription, .models] {
                 let st = SettingsTabState(); st.tab = tab
                 render(SettingsView(services: services, tabState: st), size: NSSize(width: 860, height: 680), appearance: .aqua, to: out.appendingPathComponent("settings-\(tab.rawValue).png"))
             }
@@ -26,7 +26,6 @@ enum SnapshotRenderer {
             for step in 0..<6 {
                 render(OnboardingView(services: services, initialStep: step, onFinish: {}), size: NSSize(width: 680, height: 640), appearance: .aqua, to: out.appendingPathComponent("onboarding-\(step).png"))
             }
-            render(HistoryView(services: services), size: NSSize(width: 1040, height: 720), appearance: .aqua, to: out.appendingPathComponent("history.png"))
             if let item = services.calendar.agendaItems.first(where: { $0.event.title.contains("Customer") }) ?? services.calendar.agendaItems.first,
                let r = services.calendar.resolvedOccurrence(for: item) {
                 let nb = NotebookViewModel(services: services)
@@ -72,6 +71,42 @@ enum SnapshotRenderer {
         nb.tab = .transcript
         render(NotebookView(model: nb, coordinator: services.coordinator, summaries: services.summaries), size: NSSize(width: 980, height: 700), appearance: .aqua, to: out.appendingPathComponent("notebook-transcript.png"))
         render(NotebookView(model: nb, coordinator: services.coordinator, summaries: services.summaries), size: NSSize(width: 980, height: 700), appearance: .darkAqua, to: out.appendingPathComponent("notebook-transcript-dark.png"))
+
+        // Sample summary for the same meeting.
+        if ((try? await store.summaries(occurrenceID: r.occurrence.id)) ?? []).isEmpty {
+            var s = SummaryV1()
+            s.overview = "A short check-in after yesterday's release. The rollout is healthy and the two support tickets about the settings page are already fixed in the next build. The rest of the meeting was planning for next week."
+            s.discussionPoints = ["Release rollout status", "Support tickets about the settings page", "Planning for next week"]
+            s.decisions = [.init(text: "Ship the settings fixes with the next build.", sourceSegmentIDs: [])]
+            s.actionItems = [.init(text: "Send the release notes to the team", owner: "You", dueDateText: "Friday", sourceSegmentIDs: []),
+                             .init(text: "Draft next week's plan", owner: "Sam", dueDateText: nil, sourceSegmentIDs: [])]
+            s.openQuestions = ["Do we need a follow-up with support after the fix ships?"]
+            let ids = ((try? await store.sessions(occurrenceID: r.occurrence.id)) ?? []).map(\.id)
+            try? await store.insertSummary(SummaryVersionRecord(id: UUID(), occurrenceID: r.occurrence.id, sourceSessionIDs: ids, transcriptDigest: "sample",
+                                                                modelID: "sample", modelRevision: "sample", promptVersion: "sample", generationJSON: "{}",
+                                                                result: s, userEdited: false, createdAt: Date()), notebookID: r.notebook.id)
+        }
+        await nb.open(occurrenceID: r.occurrence.id, resolved: r)
+        nb.tab = .summary
+        render(NotebookView(model: nb, coordinator: services.coordinator, summaries: services.summaries), size: NSSize(width: 980, height: 700), appearance: .aqua, to: out.appendingPathComponent("notebook-summary.png"))
+
+        // Some notes and joins, so the month grid and Stats have something to show.
+        for (i, other) in services.calendar.agendaItems.enumerated() {
+            guard let o = services.calendar.resolvedOccurrence(for: other) else { continue }
+            if i % 3 != 2 { try? await store.recordJoin(occurrenceID: o.occurrence.id) }
+            let key = DocumentKey(scope: .occurrence(notebookID: o.notebook.id, occurrenceID: o.occurrence.id), kind: .notes)
+            if i % 2 == 0, (try? await store.document(key))?.revision == 0 {
+                _ = try? await store.save(DocumentRevision(key: key, baseRevision: 0, body: "Sample notes"))
+            }
+        }
+        let range = FetchRanges.monthGrid(containing: Date())
+        let saved = (try? await store.occurrences(in: range)) ?? []
+        let events = (try? await services.calendar.repository.occurrences(in: range, calendarIDs: services.settings.selectedCalendarIDs)) ?? []
+        render(HistoryView(services: services, preloaded: (saved, events)), size: NSSize(width: 1040, height: 720), appearance: .aqua, to: out.appendingPathComponent("history.png"))
+
+        let st = SettingsTabState(); st.tab = .stats
+        let stats = try? await store.stats()
+        render(SettingsView(services: services, tabState: st, statsPreview: stats), size: NSSize(width: 860, height: 680), appearance: .aqua, to: out.appendingPathComponent("settings-Stats.png"))
     }
 
     static func render<V: View>(_ view: V, size: NSSize, appearance: NSAppearance.Name, to url: URL) {

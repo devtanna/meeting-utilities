@@ -2,7 +2,7 @@ import MeetingCore
 import MeetingData
 import SwiftUI
 
-/// Calendar and Notes: month grid (EventKit events for the visible grid merged with saved occurrences, one bounded
+/// Calendar window: month grid (EventKit events for the visible grid merged with saved occurrences, one bounded
 /// query each, §5.4), day detail, and local full-text search (§9.3).
 struct HistoryView: View {
     let services: AppServices
@@ -14,6 +14,15 @@ struct HistoryView: View {
     @State private var hits: [SearchHit] = []
     @State private var searchTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    /// `preloaded` fills the grid up front (snapshots render offscreen, where `.task` doesn't get to run).
+    init(services: AppServices, preloaded: (saved: [OccurrenceSummary], events: [CalendarOccurrenceSnapshot])? = nil) {
+        self.services = services
+        if let preloaded {
+            _saved = State(initialValue: preloaded.saved)
+            _events = State(initialValue: preloaded.events)
+        }
+    }
 
     var body: some View {
         HStack(spacing: 0) {

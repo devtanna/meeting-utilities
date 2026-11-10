@@ -187,7 +187,7 @@ struct AgendaView: View {
         .accessibilityElement(children: .contain)
     }
 
-    // MARK: Top actions: Join, Dismiss, Open notes, Open in Calendar, Start/Stop transcription
+    // MARK: Top actions: Join, Dismiss, Open notes, Open in Calendar, Calendar window, Start/Stop transcription
 
     @ViewBuilder var actions: some View {
         let item = selected
@@ -208,6 +208,7 @@ struct AgendaView: View {
             ActionRow(icon: "calendar", title: openInTitle, enabled: item != nil) {
                 if let item { services.opener.openInCalendar(item.event); onClose() }
             }
+            ActionRow(icon: "calendar", title: "Calendar", enabled: true) { services.windows.openHistory(); onClose() }
             transcriptionAction(item)
         }
     }
@@ -298,7 +299,7 @@ struct AgendaView: View {
             Text("No meetings").foregroundStyle(.tertiary).padding(.horizontal, 12).frame(height: Self.rowHeight)
         }
         ForEach(section.items) { item in
-            AgendaRow(item: item, now: services.now, isSelected: selected?.id == item.id, timeFormat: settings.timeFormat,
+            AgendaRow(item: item, now: services.now, isSelected: selectedID == item.id, timeFormat: settings.timeFormat,
                       active: coordinator.active?.occurrenceID == calendar.occurrenceID(for: item),
                       toggleDismissed: { Task { await calendar.dismiss(item, !item.isDismissed) } })
                 .onTapGesture { selectedID = item.id }
@@ -354,6 +355,8 @@ struct AgendaView: View {
     func move(_ delta: Int) {
         let all = calendar.sections.flatMap(\.items)
         guard !all.isEmpty else { return }
+        // Nothing highlighted yet: the first arrow press highlights the meeting the actions already target.
+        if selectedID == nil, let target = selected, all.contains(where: { $0.id == target.id }) { selectedID = target.id; return }
         let idx = all.firstIndex { $0.id == selected?.id } ?? -1
         selectedID = all[max(0, min(all.count - 1, idx + delta))].id
     }
@@ -382,7 +385,6 @@ struct AgendaView: View {
 
     var footer: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ActionRow(icon: "magnifyingglass", title: "Calendar and Notes…", enabled: true) { services.windows.openHistory(); onClose() }
             ActionRow(icon: "gearshape", title: "Settings", enabled: true, shortcut: "⌘,") { services.windows.openSettings(); onClose() }
             ActionRow(icon: "power", title: "Quit Meeting Utility", enabled: true, shortcut: "⌘Q") { NSApp.terminate(nil) }
         }

@@ -112,6 +112,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     let services: AppServices
     @ObservedObject var tabState: SettingsTabState
+    var statsPreview: MeetingStats? = nil // snapshots only
     @State private var query = ""
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -244,7 +245,7 @@ struct SettingsView: View {
         case .focus: FocusSettings(services: services, settings: services.settings)
         case .transcription: TranscriptionSettings(services: services, settings: services.settings, models: services.models, tabState: tabState)
         case .models: ModelSettings(services: services, models: services.models)
-        case .stats: StatsSettings(store: services.store)
+        case .stats: StatsSettings(store: services.store, stats: statsPreview)
         case .data: DataSettings(services: services)
         case .updates: UpdateSettings(updates: services.updates, settings: services.settings)
         case .diagnostics: DiagnosticsSettings(services: services)
@@ -899,6 +900,12 @@ struct ModelSettings: View {
 struct StatsSettings: View {
     let store: MeetingStore
     @State private var stats: MeetingStats?
+
+    /// `stats` pre-fills the page (snapshots render offscreen, where `.task` doesn't get to run).
+    init(store: MeetingStore, stats: MeetingStats? = nil) {
+        self.store = store
+        _stats = State(initialValue: stats)
+    }
 
     var body: some View {
         Grid(horizontalSpacing: 10, verticalSpacing: 10) {

@@ -87,7 +87,7 @@ final class WindowRouter: NSObject, NSWindowDelegate {
 
     func openHistory() {
         if historyWindow == nil {
-            historyWindow = makeWindow("Calendar and Notes", HistoryView(services: services), size: NSSize(width: 1040, height: 720), autosave: "HistoryWindow2", chromeless: true, tallTitlebar: true)
+            historyWindow = makeWindow("Calendar", HistoryView(services: services), size: NSSize(width: 1040, height: 720), autosave: "HistoryWindow2", chromeless: true, tallTitlebar: true)
         }
         show(historyWindow!)
     }

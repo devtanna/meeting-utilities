@@ -30,26 +30,56 @@
 
 - **Agenda in the menu bar or the notch.** Today and tomorrow at a glance, keyboard-driven (↑/↓, Return to join,
   ⌘O for notes). On Macs without a notch, notch mode becomes a small capsule at the top of the screen.
-- **One-click join** for Google Meet, Zoom and Microsoft Teams, in the native app or your browser. Optional
-  **auto join** at the start time.
+- **One-click join** for Google Meet, Zoom and Microsoft Teams, in the native app or your browser, from the agenda,
+  a reminder or a global shortcut (⌥⌘J). Optional **auto join** at the start time.
 - **Notebooks per recurring meeting.** Series notes shared by every occurrence, plus dated notes for each one,
   in Markdown. Copy last week's notes forward in one click.
+- **Local transcription and summaries.** [Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) speech-to-text
+  and Qwen3 4B summaries (overview, decisions, action items, open questions), run with Apple's
+  [MLX](https://github.com/ml-explore/mlx-swift) in a separate on-demand process. Models are optional downloads
+  (about 2.5 GB and 2.3 GB).
+- **Calendar and search.** A month view showing which meetings have notes, transcripts or summaries, with full-text
+  search across all of them.
 - **Talktrack**, a floating teleprompter that stays above the call window and scrolls at your pace, with a script
   per meeting.
-- **Local transcription and summaries.** [Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) speech-to-text
-  and Qwen3 4B summaries, run with Apple's [MLX](https://github.com/ml-explore/mlx-swift) in a separate on-demand
-  process. Models are optional downloads.
 - **Reminders and Do Not Disturb.** Native notifications before meetings, plus a Focus mode that turns on while you're
   in a call.
 - **Sounds.** A cue before each meeting and an optional clock-aligned chime (e.g. every 30 minutes) limited to the
   days and hours you choose. They stay silent while you're away from the Mac.
-- **Quarter tracker.** Always know where the quarter stands: `Q4 37/92 · 56D to Q1`.
+- **Quarter tracker.** Always know where the quarter stands: `Q4 · 52D → Q1`.
+- **Stats.** How many meetings you've joined, and how many have notes, transcripts and summaries.
+
+## Screenshots
+
+All screenshots use the app's synthetic sample calendar.
+
+**Agenda.** Everything in the menu bar acts on the meeting shown there; click another meeting to act on it instead.
+
+<p align="center"><img src="docs/images/agenda.png" width="430" alt="Agenda in the menu bar with join, notes and transcription actions above today's and tomorrow's meetings"></p>
+
+**Notebooks.** Series notes shared across a recurring meeting, plus notes for each date.
+
+<p align="center"><img src="docs/images/notebook-notes.png" width="760" alt="Meeting notebook with dated entries and Markdown notes"></p>
+
+**Transcripts and summaries.** Your microphone and the other participants are captured separately, so the
+transcript knows who said what. Summaries are generated on your Mac from the saved transcript.
 
 <p align="center">
-  <img src="docs/images/screenshot-agenda.png" height="380" alt="Agenda">
-  &nbsp;
-  <img src="docs/images/screenshot-notebook.png" height="380" alt="Meeting notebook">
+  <img src="docs/images/notebook-transcript.png" width="49%" alt="Transcript with timestamps, split between You and Other participants">
+  <img src="docs/images/notebook-summary.png" width="49%" alt="Summary with overview, discussion points, decisions, action items and open questions">
 </p>
+
+**Calendar and search.** See at a glance which meetings have notes, transcripts or summaries, and search all of them.
+
+<p align="center"><img src="docs/images/calendar.png" width="760" alt="Month calendar with note, transcript and summary badges and a search field"></p>
+
+**Talktrack.** A teleprompter that floats above your call window.
+
+<p align="center"><img src="docs/images/talktrack.png" width="520" alt="Floating teleprompter showing a meeting script with speed and font controls"></p>
+
+**Stats.** Counts of meetings joined, and of meetings with notes, transcripts and summaries.
+
+<p align="center"><img src="docs/images/stats.png" width="620" alt="Settings Stats page with four counters"></p>
 
 ## Privacy
 
@@ -58,8 +88,8 @@ Everything runs on your Mac. There is no account, telemetry, analytics, cloud AI
 - Audio is processed in small in-memory buffers and **never written to disk**. Only transcripts, summaries and your
   notes are saved, in a local SQLite database.
 - Calendar access is read-only.
-- The app connects to the network only to download models you choose (from Hugging Face) and, in signed release
-  builds, to check for updates.
+- The app connects to the network only to download models you choose (from Hugging Face). There is no automatic
+  update check yet; new versions are published on [GitHub Releases](https://github.com/devtanna/meeting-utilities/releases).
 
 Details, including a table of every piece of data and where it goes: [docs/privacy.md](docs/privacy.md).
 
@@ -109,7 +139,7 @@ which is git-ignored.
 | Flag | Effect |
 |---|---|
 | `-UseFakeCalendar YES` | Synthetic calendar with a separate database and preferences (never touches your real notes) |
-| `-RenderSnapshots <dir> -QuitAfterSnapshots YES` | Renders agenda, settings, notebook and onboarding PNGs offscreen |
+| `-RenderSnapshots <dir> -QuitAfterSnapshots YES` | Renders agenda, settings, notebook, calendar and onboarding PNGs offscreen (the README screenshots) |
 | `-SelfTest <report.json> -SelfTestPCM <file> [-SelfTestDownload YES]` | End-to-end XPC, MLX and model self-test |
 
 </details>
