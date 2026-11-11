@@ -49,6 +49,18 @@
 - **Quarter tracker.** Always know where the quarter stands: `Q4 · 52D → Q1`.
 - **Stats.** How many meetings you've joined, and how many have notes, transcripts and summaries.
 
+## Works with
+
+<p align="center">
+  <img src="docs/images/platforms/zoom.svg" width="36" height="36" alt="Zoom logo" align="middle">&nbsp; <strong>Zoom</strong>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/images/platforms/microsoft-teams.svg" width="36" height="36" alt="Microsoft Teams logo" align="middle">&nbsp; <strong>Microsoft Teams</strong>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/images/platforms/google-meet.svg" width="36" height="36" alt="Google Meet logo" align="middle">&nbsp; <strong>Google Meet</strong>
+</p>
+
+<p align="center">Join links are detected in your calendar events and open in the native app or your browser.</p>
+
 ## Screenshots
 
 All screenshots use the app's synthetic sample calendar.
