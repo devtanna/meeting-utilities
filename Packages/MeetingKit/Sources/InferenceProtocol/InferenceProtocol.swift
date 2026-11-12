@@ -19,6 +19,8 @@ public enum InferenceProtocolVersion {
     func transcribe(_ header: Data, pcm: Data, reply: @escaping @Sendable (Data) -> Void)
     func generate(_ request: Data, reply: @escaping @Sendable (Data) -> Void)
     func cancel(_ request: Data, reply: @escaping @Sendable (Data) -> Void)
+    /// The text a running `generate` job has written so far, so the app can show it as it is written.
+    func generationProgress(_ request: Data, reply: @escaping @Sendable (Data) -> Void)
 }
 
 public enum ModelKind: String, Codable, Sendable { case speech, summary }
@@ -157,6 +159,24 @@ public struct GenerateResult: Codable, Sendable {
     public init(jobID: UUID, ok: Bool, errorCode: String?, text: String, promptTokens: Int, generatedTokens: Int, elapsedSeconds: Double) {
         self.jobID = jobID; self.ok = ok; self.errorCode = errorCode; self.text = text; self.promptTokens = promptTokens
         self.generatedTokens = generatedTokens; self.elapsedSeconds = elapsedSeconds
+    }
+}
+
+public struct GenerationProgressRequest: Codable, Sendable {
+    public var protocolVersion = InferenceProtocolVersion.current
+    public var jobID: UUID
+    public init(jobID: UUID) { self.jobID = jobID }
+}
+
+public struct GenerationProgress: Codable, Sendable {
+    public var protocolVersion = InferenceProtocolVersion.current
+    public var jobID: UUID
+    /// False when the service has no running generation for this job.
+    public var running: Bool
+    public var text: String
+    public var generatedTokens: Int
+    public init(jobID: UUID, running: Bool, text: String, generatedTokens: Int) {
+        self.jobID = jobID; self.running = running; self.text = text; self.generatedTokens = generatedTokens
     }
 }
 

@@ -10,6 +10,8 @@ public struct ExportBundle: Sendable {
 public struct OccurrenceExportV1: Codable, Sendable {
     public struct Segment: Codable, Sendable {
         public var source: String, kind: String, startOffsetMs: Int, endOffsetMs: Int, text: String
+        /// The other side's speaker, when the call app showed who was talking.
+        public var speaker: String?
     }
     public struct Session: Codable, Sendable {
         public var id: UUID, state: String, start: Date?, end: Date?, stopReason: String?, segments: [Segment]
@@ -51,7 +53,7 @@ extension MeetingStore {
             seriesNotes: series, notes: notes, talktrack: tt,
             sessions: transcript.map { s, segs in
                 .init(id: s.id, state: s.state.rawValue, start: s.actualStart, end: s.actualEnd, stopReason: s.stopReason?.rawValue,
-                      segments: segs.map { .init(source: $0.source, kind: $0.kind.rawValue, startOffsetMs: $0.startOffsetMs, endOffsetMs: $0.endOffsetMs, text: $0.text) })
+                      segments: segs.map { .init(source: $0.source, kind: $0.kind.rawValue, startOffsetMs: $0.startOffsetMs, endOffsetMs: $0.endOffsetMs, text: $0.text, speaker: $0.speaker) })
             },
             summary: summary?.result, summaryModel: summary.map { "\($0.modelID)@\($0.modelRevision)" })
         return (ex, Self.markdown(ex))
@@ -102,7 +104,7 @@ extension MeetingStore {
                     if seg.kind == "gap" {
                         md += "- `\(stamp)` **[gap — no transcript for \((seg.endOffsetMs - seg.startOffsetMs) / 1000)s]**\n"
                     } else {
-                        md += "- `\(stamp)` **\(seg.source == "microphone" ? "You" : "Other participants"):** \(seg.text)\n"
+                        md += "- `\(stamp)` **\(seg.source == "microphone" ? "You" : seg.speaker ?? "Other participants"):** \(seg.text)\n"
                     }
                 }
                 md += "\n"

@@ -173,6 +173,8 @@ struct PlainTextEditor: NSViewRepresentable {
 struct SelectableText: NSViewRepresentable {
     var text: NSAttributedString
     var accessibilityLabel = "Text"
+    /// Keep the end in view as text is added, while the reader is already at the end (a live transcript).
+    var followsEnd = false
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -194,9 +196,12 @@ struct SelectableText: NSViewRepresentable {
         // Reloads happen on every database change; only replace text that actually changed, keeping the selection.
         guard tv.attributedString() != text else { return }
         let sel = tv.selectedRanges
+        let visible = scroll.contentView.documentVisibleRect
+        let atEnd = visible.maxY >= tv.bounds.height - 24
         tv.textStorage?.setAttributedString(text)
         let kept = sel.filter { $0.rangeValue.upperBound <= text.length }
         tv.selectedRanges = kept.isEmpty ? [NSValue(range: NSRange(location: 0, length: 0))] : kept   // must never be empty
+        if followsEnd && atEnd { tv.scrollToEndOfDocument(nil) }
     }
 }
 

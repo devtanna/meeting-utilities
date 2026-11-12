@@ -109,16 +109,16 @@ extension MeetingStore {
                 let rev: Int = existing["revision"]
                 let committed: Int = existing["committed"]
                 if rev >= s.revision || (committed == 1 && !s.committed) { return false }
-                try db.execute(sql: "UPDATE transcript_segments SET revision = ?, text = ?, start_offset_ms = ?, end_offset_ms = ?, committed = ?, kind = ? WHERE id = ?",
-                               arguments: [s.revision, s.text, s.startOffsetMs, max(s.endOffsetMs, s.startOffsetMs), s.committed ? 1 : 0, s.kind.rawValue, existing["id"] as String])
+                try db.execute(sql: "UPDATE transcript_segments SET revision = ?, text = ?, start_offset_ms = ?, end_offset_ms = ?, committed = ?, kind = ?, speaker = ? WHERE id = ?",
+                               arguments: [s.revision, s.text, s.startOffsetMs, max(s.endOffsetMs, s.startOffsetMs), s.committed ? 1 : 0, s.kind.rawValue, s.speaker, existing["id"] as String])
                 try Self.upsertSearch(db, recordID: "seg:\(existing["id"] as String)", notebookID: notebookID, occurrenceID: occurrenceID, kind: "transcript", title: "", body: s.text)
                 return true
             }
             try db.execute(sql: """
-                INSERT INTO transcript_segments(id, session_id, source, sequence, revision, kind, start_offset_ms, end_offset_ms, text, committed)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO transcript_segments(id, session_id, source, sequence, revision, kind, start_offset_ms, end_offset_ms, text, committed, speaker)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, arguments: [s.id.uuidString, s.sessionID.uuidString, s.source, s.sequence, s.revision, s.kind.rawValue,
-                                 max(0, s.startOffsetMs), max(s.endOffsetMs, max(0, s.startOffsetMs)), s.text, s.committed ? 1 : 0])
+                                 max(0, s.startOffsetMs), max(s.endOffsetMs, max(0, s.startOffsetMs)), s.text, s.committed ? 1 : 0, s.speaker])
             if s.kind == .speech && !s.text.isEmpty {
                 try Self.upsertSearch(db, recordID: "seg:\(s.id.uuidString)", notebookID: notebookID, occurrenceID: occurrenceID, kind: "transcript", title: "", body: s.text)
             }
@@ -148,7 +148,7 @@ extension MeetingStore {
                                 arguments: StatementArguments(sessionIDs)).map { r in
             TranscriptSegmentRecord(id: UUID(uuidString: r["id"])!, sessionID: UUID(uuidString: r["session_id"])!, source: r["source"], sequence: r["sequence"],
                                     revision: r["revision"], kind: SegmentKind(rawValue: r["kind"]) ?? .speech, startOffsetMs: r["start_offset_ms"],
-                                    endOffsetMs: r["end_offset_ms"], text: r["text"], committed: (r["committed"] as Int) == 1)
+                                    endOffsetMs: r["end_offset_ms"], text: r["text"], committed: (r["committed"] as Int) == 1, speaker: r["speaker"])
         }
     }
 

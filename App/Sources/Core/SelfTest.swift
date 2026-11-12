@@ -80,7 +80,7 @@ enum SelfTest {
                         SummarySegment(id: "S4", source: "Gap", offsetMs: 15000, endOffsetMs: 30000, text: "", isGap: true),
                         SummarySegment(id: "S5", source: "You", offsetMs: 30000, endOffsetMs: 36000, text: "Someone should check whether legal needs to review the pricing page."),
                     ]
-                    let prompt = SummaryPrompt.sectionPrompt(meetingTitle: nil, segments: segs, sectionIndex: 0, sectionCount: 1)
+                    let prompt = SummaryPrompt.sectionPrompt(segments: segs, sectionIndex: 0, sectionCount: 1)
                     let r = try await s.inference.generate(GenerateRequest(jobID: UUID(), system: SummaryPrompt.system, user: prompt, maxTokens: 1200, maxKVSize: 8192))
                     record("summary_tokens", "prompt=\(r.promptTokens) gen=\(r.generatedTokens) s=\(String(format: "%.1f", r.elapsedSeconds))")
                     if let parsed = SummaryPrompt.decode(r.text) ?? SummaryPrompt.repair(r.text).flatMap(SummaryPrompt.decode) {
@@ -112,7 +112,7 @@ enum SelfTest {
                 var partials: [SummaryV1] = []
                 do {
                     for (i, sec) in sections.enumerated() {
-                        let r = try await s.inference.generate(GenerateRequest(jobID: UUID(), system: SummaryPrompt.system, user: SummaryPrompt.sectionPrompt(meetingTitle: nil, segments: sec, sectionIndex: i, sectionCount: sections.count), maxTokens: 1200, maxKVSize: 8192))
+                        let r = try await s.inference.generate(GenerateRequest(jobID: UUID(), system: SummaryPrompt.system, user: SummaryPrompt.sectionPrompt(segments: sec, sectionIndex: i, sectionCount: sections.count), maxTokens: 1200, maxKVSize: 8192))
                         if let p = SummaryPrompt.decode(r.text) ?? SummaryPrompt.repair(r.text).flatMap(SummaryPrompt.decode) {
                             partials.append(SummaryValidator.validate(p, knownSegmentIDs: Set(sec.map(\.id)), gapNotes: []).0)
                         } else {

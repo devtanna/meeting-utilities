@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import KeyboardShortcuts
+import InferenceProtocol
 import MeetingAudio
 import MeetingCore
 import MeetingData
@@ -78,8 +79,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .sounds: "sound chime beep volume interval before meeting alert audio"
         case .automation: "auto join open link browser zoom teams meet app"
         case .focus: "do not disturb dnd shortcut"
-        case .transcription: "microphone system audio record transcript summary automatic test"
-        case .models: "download parakeet qwen speech summary model disk"
+        case .transcription: "microphone system audio record transcript summary automatic test speaker names zoom teams meet accessibility echo headphones"
+        case .models: "download parakeet qwen speech summary model disk load unload memory"
         case .stats: "statistics count counter numbers joined meetings notes transcripts transcriptions summaries usage"
         case .data: "erase delete backup export folder repair"
         case .updates: "sparkle version update"
@@ -244,7 +245,7 @@ struct SettingsView: View {
         case .automation: AutoJoinSettings(settings: services.settings)
         case .focus: FocusSettings(services: services, settings: services.settings)
         case .transcription: TranscriptionSettings(services: services, settings: services.settings, models: services.models, tabState: tabState)
-        case .models: ModelSettings(services: services, models: services.models)
+        case .models: ModelSettings(services: services, models: services.models, residency: services.residency)
         case .stats: StatsSettings(store: services.store, stats: statsPreview)
         case .data: DataSettings(services: services)
         case .updates: UpdateSettings(updates: services.updates, settings: services.settings)
@@ -743,6 +744,7 @@ struct TranscriptionSettings: View {
     @State private var micResult: String?
     @State private var sysResult: String?
     @State private var testing = false
+    @State private var accessibilityTrusted = CallWatcher.isTrusted
 
     var body: some View {
         SettingsCard {
@@ -788,8 +790,29 @@ struct TranscriptionSettings: View {
                 Button("Test") { testSystem() }.disabled(testing)
             }
         }
-        Footnote("“Other participants” is everything your Mac plays (including Meeting Utility's own chimes), so other apps' sound during a meeting is included. Labels are sources, not verified speakers.")
+        Footnote("“Other participants” is everything your Mac plays (including Meeting Utility's own chimes), so other apps' sound during a meeting is included. Without headphones, lines your microphone picks up from the speakers are recognized and left out.")
             .task { devices = AudioDevices.all() }
+        GroupLabel("Speaker names")
+        SettingsCard {
+            SettingsRow(title: "Name speakers from Zoom, Teams and Meet", subtitle: "Lines from the other side are named after the person the call app shows talking.") {
+                Switch(isOn: $settings.nameSpeakersFromCalls, label: "Name speakers from calls")
+            }
+            if settings.nameSpeakersFromCalls {
+                RowDivider()
+                SettingsRow(title: "Accessibility access", subtitle: accessibilityTrusted ? "Allowed. The call window is only read, never clicked or changed." : "Needed to read who is talking in the call window. Allow Meeting Utility in Privacy & Security › Accessibility.") {
+                    StatusPill(text: accessibilityTrusted ? "Allowed" : "Not allowed", ok: accessibilityTrusted)
+                    if !accessibilityTrusted {
+                        Button("Allow…") {
+                            if !CallWatcher.requestTrust() { CallWatcher.openAccessibilitySettings() }
+                        }
+                    }
+                }
+            }
+        }
+        Footnote("Nothing is guessed: a line gets a name only when the call app marks one person as talking for most of it, or when there is just one other person in the call. Otherwise it stays “Other participants”. Names stay on this Mac. Zoom names the active speaker only in calls of three or more; Google Meet's marker can change with Google's updates.")
+            .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
+                if settings.nameSpeakersFromCalls { accessibilityTrusted = CallWatcher.isTrusted }
+            }
     }
 
     func readinessRow(_ title: String, ok: Bool, action: String?) -> some View {
@@ -834,6 +857,7 @@ struct TranscriptionSettings: View {
 struct ModelSettings: View {
     let services: AppServices
     @ObservedObject var models: ModelManager
+    @ObservedObject var residency: ModelResidency
     @State private var confirmDelete: ModelCatalogEntry?
 
     var body: some View {
@@ -848,16 +872,22 @@ struct ModelSettings: View {
                 }
                 RowDivider()
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(models.states[m.id]?.label ?? "Not installed").font(.system(size: 12, weight: .medium))
+                    if models.states[m.id]?.isReady == true {
+                        memoryRow(m).padding(.bottom, 4)
+                    } else {
+                        Text(models.states[m.id]?.label ?? "Not installed").font(.system(size: 12, weight: .medium))
+                    }
                     Text(m.attribution).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     Text("Revision \(m.artifactRevision.prefix(12))").font(.system(size: 10).monospaced()).foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10)
             }
         }
+        Footnote("Models load into memory when a transcript or summary needs them and are released about 30 seconds after. Load keeps one ready so the next one starts faster; only one model is held at a time, so loading one releases the other.")
         Footnote("Nothing is downloaded until you press Download. Files are verified by size and SHA-256 and run entirely on this Mac. Calendar, notes, Talktrack, reminders and the quarter tracker work without them. Free space: \(ByteCountFormatter.string(fromByteCount: models.freeSpaceBytes, countStyle: .file)) · \(models.modelsDir.path)")
             .alert("Remove this model?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }), presenting: confirmDelete) { m in
                 Button("Remove", role: .destructive) {
+                    Task { await residency.forget(ModelResidency.kind(m.purpose)) }
                     if models.delete(m) == .inUse {
                         Task {
                             await services.coordinator.stop(reason: .user)
@@ -869,6 +899,65 @@ struct ModelSettings: View {
             } message: { m in
                 Text(services.coordinator.isCapturing && m.purpose == .speechToText ? "It is in use: transcription will stop first. Notes, transcripts and summaries are kept." : "Notes, transcripts and summaries are kept. Queued jobs that need it are cancelled.")
             }
+    }
+
+    /// Whether the model is in memory right now, with a Load/Unload button.
+    @ViewBuilder func memoryRow(_ m: ModelCatalogEntry) -> some View {
+        let kind = ModelResidency.kind(m.purpose)
+        let activity = residency.activity[kind]
+        let loaded = residency.resident == kind
+        let inUse = residency.isInUse(kind)
+        HStack(spacing: 8) {
+            Group {
+                if activity != nil {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: loaded ? "memorychip.fill" : "memorychip")
+                        .foregroundStyle(loaded ? Brand.green : Color.secondary)
+                }
+            }
+            .frame(width: 16, height: 16)
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(memoryTitle(kind, activity: activity, loaded: loaded, inUse: inUse))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(loaded && activity == nil ? Brand.green : Color.primary)
+                if let detail = residency.errors[kind] ?? memoryDetail(kind, loaded: loaded, inUse: inUse) {
+                    Text(detail).font(.system(size: 11))
+                        .foregroundStyle(residency.errors[kind] != nil ? Color.red : Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 8)
+            if loaded {
+                Button("Unload") { Task { await residency.unload(kind) } }
+                    .disabled(activity != nil || inUse)
+                    .help(inUse ? "In use. It's released automatically when the work finishes." : "Free this model's memory now.")
+            } else {
+                let blocked = residency.blockedReason(kind)
+                Button("Load") { Task { await residency.load(m) } }
+                    .disabled(activity != nil || blocked != nil)
+                    .help(blocked ?? "Load into memory now and keep it there until you unload it.")
+            }
+        }
+    }
+
+    func memoryTitle(_ kind: ModelKind, activity: ModelResidency.Activity?, loaded: Bool, inUse: Bool) -> String {
+        switch activity {
+        case .loading: return "Loading into memory…"
+        case .unloading: return "Unloading…"
+        case nil: return loaded ? (inUse ? "Loaded · in use" : "Loaded in memory") : "Not loaded"
+        }
+    }
+
+    func memoryDetail(_ kind: ModelKind, loaded: Bool, inUse: Bool) -> String? {
+        if !loaded { return "Loads automatically when \(kind == .speech ? "a transcript starts" : "a summary is written")." }
+        if inUse { return kind == .speech ? "Transcribing a meeting." : "Writing a summary." }
+        if residency.kept == kind {
+            return "Kept until you unload it" + (residency.memoryBytes.map { " · \(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory)) in use" } ?? "") + "."
+        }
+        return "Released automatically when idle."
     }
 
     @ViewBuilder func controls(_ m: ModelCatalogEntry) -> some View {

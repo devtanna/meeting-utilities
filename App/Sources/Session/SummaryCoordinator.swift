@@ -16,12 +16,16 @@ final class SummaryCoordinator: ObservableObject {
     @Published private(set) var states: [UUID: SummaryState] = [:]          // by occurrence
     @Published private(set) var messages: [UUID: String] = [:]
     @Published private(set) var deferredReason: String?
+    /// The summary as it is being written (unfinished JSON read leniently), by occurrence; never saved.
+    @Published private(set) var drafts: [UUID: SummaryV1] = [:]
 
     private let store: MeetingStore
     private let models: ModelManager
     private let client: InferenceClient
     private let settings: AppSettings
     var isCaptureActive: () -> Bool = { false }
+    /// Title, invitees, length and the person's notes for a meeting, read when its summary is written.
+    var meetingContext: (UUID) async -> SummaryContext = { _ in SummaryContext() }
     private var running: Task<Void, Never>?
     private var runningJob: UUID?
     private var pausedForMemory = false
@@ -136,23 +140,26 @@ final class SummaryCoordinator: ObservableObject {
         guard var progress = decode(job.progressJSON) else { try? await store.updateJob(job.id, state: "failed"); states[occ] = .failed; return }
         try? await store.updateJob(job.id, state: "running", incrementAttempt: true)
         states[occ] = .loadingModel
+        defer { drafts[occ] = nil }
         do {
             let segments = try await allSegments(occ)
             let digest = MeetingStore.transcriptDigest(segments)
             if digest != progress.digest { progress = Progress(digest: digest, sectionCount: 0, partials: [], notebookID: progress.notebookID) }
             // Stable short IDs for citations, gaps preserved as explicit coverage (§14.4, §14.5).
             let summarySegments = segments.enumerated().map { i, s in
-                SummarySegment(id: "S\(i + 1)", source: s.sourceLabel, offsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text, isGap: s.kind == .gap)
+                SummarySegment(id: "S\(i + 1)", source: s.promptSpeaker, offsetMs: s.startOffsetMs, endOffsetMs: s.endOffsetMs, text: s.text, isGap: s.kind == .gap)
             }
             let gapNotes = segments.filter { $0.kind == .gap }.map { g in
                 "No transcript for \(Self.stamp(g.startOffsetMs))–\(Self.stamp(g.endOffsetMs)) (\(g.sourceLabel))"
             }
             let known = Set(summarySegments.filter { !$0.isGap }.map(\.id))
-            let sections = SummaryPrompt.sections(summarySegments)
+            var context = await meetingContext(occ)
+            if context.minutes == nil { context.minutes = Self.minutes(segments) }
+            let sections = SummaryPrompt.sections(summarySegments, budgetTokens: SummaryPrompt.transcriptBudget(context))
             progress.sectionCount = sections.count
 
-            // Speech model is released before the summary model loads (§14.3).
-            await client.unloadModels()
+            // Speech model is released before the summary model loads (§14.3); an already-loaded summary model is reused.
+            if client.residentModel != .summary { await client.unloadModels() }
             _ = try await client.load(kind: .summary, modelID: entry.id, revision: entry.artifactRevision, directory: models.installDirectory(entry))
             models.setInUse(.summary, true)
             defer { models.setInUse(.summary, false) }
@@ -161,9 +168,9 @@ final class SummaryCoordinator: ObservableObject {
             for i in progress.partials.count..<sections.count {
                 try Task.checkCancellation()
                 messages[occ] = sections.count > 1 ? "Summarizing section \(i + 1) of \(sections.count)…" : "Summarizing…"
-                let prompt = SummaryPrompt.sectionPrompt(meetingTitle: nil, segments: sections[i], sectionIndex: i, sectionCount: sections.count)
+                let prompt = SummaryPrompt.sectionPrompt(context: context, segments: sections[i], sectionIndex: i, sectionCount: sections.count)
                 do {
-                    let (partial, gen) = try await generateValidated(job.id, prompt: prompt)
+                    let (partial, gen) = try await generateValidated(job.id, prompt: prompt, occurrenceID: occ, earlier: progress.partials)
                     lastGen = gen
                     let (validated, _) = SummaryValidator.validate(partial, knownSegmentIDs: Set(sections[i].map(\.id)), gapNotes: [])
                     progress.partials.append(validated)
@@ -182,7 +189,8 @@ final class SummaryCoordinator: ObservableObject {
             } else {
                 messages[occ] = "Combining sections…"
                 // Deterministic merge keeps every decision/action reference; the model writes only the overview.
-                let req = GenerateRequest(jobID: job.id, system: SummaryPrompt.system, user: SummaryPrompt.overviewPrompt(partials: progress.partials, coverageNotes: gapNotes),
+                drafts[occ] = SummaryMerge.merge(progress.partials, overview: nil, discussionPoints: nil)
+                let req = GenerateRequest(jobID: job.id, system: SummaryPrompt.system, user: SummaryPrompt.overviewPrompt(partials: progress.partials, coverageNotes: gapNotes, context: context),
                                           maxTokens: 600, maxKVSize: SummaryPrompt.contextBudgetTokens)
                 let r = try await client.generate(req)
                 let ov = r.ok ? SummaryPrompt.decodeOverview(r.text) : nil
@@ -193,7 +201,7 @@ final class SummaryCoordinator: ObservableObject {
             let (validated, report) = SummaryValidator.validate(final, knownSegmentIDs: known, gapNotes: gapNotes, appCoverageNotes: sectionNotes)
             let sessions = try await store.sessions(occurrenceID: occ).map(\.id)
             let generation: [String: String] = [
-                "temperature": "0.2", "topP": "0.9", "contextBudget": "\(SummaryPrompt.contextBudgetTokens)", "sections": "\(sections.count)",
+                "temperature": "0.2", "topP": "0.9", "notes": context.notes.isEmpty ? "none" : "used", "attendees": "\(context.attendees.count)", "contextBudget": "\(SummaryPrompt.contextBudgetTokens)", "sections": "\(sections.count)",
                 "removedCitations": "\(report.removedCitations)", "droppedItems": "\(report.droppedItems)",
                 "generatedTokens": "\(lastGen?.generatedTokens ?? 0)", "coverage": gapNotes.isEmpty ? "complete" : "partial",
             ]
@@ -215,9 +223,23 @@ final class SummaryCoordinator: ObservableObject {
         }
     }
 
-    /// One generation plus at most one bounded repair (§22.2).
-    private func generateValidated(_ jobID: UUID, prompt: String) async throws -> (SummaryV1, GenerateResult) {
+    /// One generation plus at most one bounded repair (§22.2). While it runs, what it has written so far is shown
+    /// (merged after the parts already done) by polling the service.
+    private func generateValidated(_ jobID: UUID, prompt: String, occurrenceID occ: UUID, earlier: [SummaryV1]) async throws -> (SummaryV1, GenerateResult) {
         let req = GenerateRequest(jobID: jobID, system: SummaryPrompt.system, user: prompt, maxTokens: Self.maxTokensPerResponse, maxKVSize: SummaryPrompt.contextBudgetTokens)
+        let client = self.client
+        let watcher = Task { @MainActor [weak self] in
+            var shown = ""
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(400))
+                guard !Task.isCancelled, let p = await client.generationProgress(jobID: jobID), p.running, p.text != shown else { continue }
+                shown = p.text
+                if let partial = SummaryPrompt.decodePartial(p.text), !Task.isCancelled {
+                    self?.drafts[occ] = earlier.isEmpty ? partial : SummaryMerge.merge(earlier + [partial], overview: nil, discussionPoints: nil)
+                }
+            }
+        }
+        defer { watcher.cancel() }
         let r = try await client.generate(req)
         guard r.ok else {
             if r.errorCode == "cancelled" { throw CancellationError() }
@@ -234,6 +256,13 @@ final class SummaryCoordinator: ObservableObject {
             id: UUID(), occurrenceID: base.occurrenceID, sourceSessionIDs: base.sourceSessionIDs, transcriptDigest: base.transcriptDigest,
             modelID: base.modelID, modelRevision: base.modelRevision, promptVersion: base.promptVersion, generationJSON: base.generationJSON,
             result: summary, userEdited: true, createdAt: Date()), notebookID: notebookID)
+    }
+
+    /// Minutes of transcript across all sessions (from each session's last line), for the prompt's "Length".
+    static func minutes(_ segments: [TranscriptSegmentRecord]) -> Int? {
+        let bySession = Dictionary(grouping: segments, by: \.sessionID).values.map { $0.map(\.endOffsetMs).max() ?? 0 }
+        let ms = bySession.reduce(0, +)
+        return ms > 0 ? Int((Double(ms) / 60_000).rounded()) : nil
     }
 
     static func stamp(_ ms: Int) -> String {

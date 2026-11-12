@@ -52,6 +52,10 @@ public struct CalendarOccurrenceSnapshot: Sendable, Hashable, Identifiable, Coda
     public var notes: String?
     public var organizer: String?
     public var lastModified: Date?
+    /// Invitees' display names (never emails), the current user excluded; nil when the calendar gave none.
+    public var attendees: [String]?
+    /// The current user's own name on the invite, when the calendar says which attendee they are.
+    public var currentUserName: String?
 
     public init(
         sourceID: String, calendarID: String, calendarTitle: String = "", calendarColor: RGBAColor = .gray,
@@ -59,7 +63,7 @@ public struct CalendarOccurrenceSnapshot: Sendable, Hashable, Identifiable, Coda
         title: String, start: Date, end: Date, timeZoneID: String? = nil, originalOccurrenceDate: Date? = nil,
         isDetached: Bool = false, isRecurring: Bool = false, isAllDay: Bool = false, isCancelled: Bool = false,
         rsvp: RSVPStatus = .accepted, url: String? = nil, location: String? = nil, notes: String? = nil,
-        organizer: String? = nil, lastModified: Date? = nil
+        organizer: String? = nil, lastModified: Date? = nil, attendees: [String]? = nil, currentUserName: String? = nil
     ) {
         self.sourceID = sourceID; self.calendarID = calendarID; self.calendarTitle = calendarTitle
         self.calendarColor = calendarColor; self.calendarItemIdentifier = calendarItemIdentifier
@@ -69,6 +73,7 @@ public struct CalendarOccurrenceSnapshot: Sendable, Hashable, Identifiable, Coda
         self.isRecurring = isRecurring; self.isAllDay = isAllDay; self.isCancelled = isCancelled
         self.rsvp = rsvp; self.url = url; self.location = location; self.notes = notes
         self.organizer = organizer; self.lastModified = lastModified
+        self.attendees = attendees; self.currentUserName = currentUserName
     }
 
     /// Anchor that stays stable when a detached recurrence instance moves (§7.2).

@@ -9,7 +9,7 @@ public enum DatabaseOpenError: Error, Sendable {
 
 /// Owns the SQLite database: WAL, synchronous=FULL, user-only permissions, migrations, backups (§18).
 public final class AppDatabase: Sendable {
-    public static let schemaVersion = 3
+    public static let schemaVersion = 4
     public static let minimumCompatibleSchema = 1
 
     public let pool: DatabasePool
@@ -98,6 +98,9 @@ public final class AppDatabase: Sendable {
         }
         m.registerMigration("v3-meeting-joins") { db in
             try db.execute(sql: Schema.v3)
+        }
+        m.registerMigration("v4-segment-speaker") { db in
+            try db.execute(sql: Schema.v4)
         }
         return m
     }
@@ -290,6 +293,12 @@ enum Schema {
         SELECT occurrence_id, COALESCE(finished_at_ms, reserved_at_ms, planned_at_ms) FROM automatic_actions
         WHERE kind = 'autoJoin' AND state = 'succeeded' AND result_code = 'open_requested';
     UPDATE app_meta SET value = '3' WHERE key = 'schema_version';
+    """
+
+    /// Who said a line from the other side, as the call app showed it (nullable, so older app versions still open the file).
+    static let v4 = """
+    ALTER TABLE transcript_segments ADD COLUMN speaker TEXT;
+    UPDATE app_meta SET value = '4' WHERE key = 'schema_version';
     """
 }
 

@@ -25,6 +25,7 @@ final class AppServices: ObservableObject {
     let focusRunner: FocusShortcutRunner
     let models: ModelManager
     let inference: InferenceClient
+    let residency: ModelResidency
     let coordinator: MeetingCoordinator
     let summaries: SummaryCoordinator
     let scheduler: AutomationScheduler
@@ -73,6 +74,7 @@ final class AppServices: ObservableObject {
         focusRunner = FocusShortcutRunner(identifierProvider: { MainActor.assumeIsolated { s.focusShortcutIdentifier } })
         models = ModelManager(appSupport: real) // model weights are shared, never meeting content
         inference = InferenceClient()
+        residency = ModelResidency(client: inference, models: models)
         coordinator = MeetingCoordinator(store: store, calendar: calendar, settings: settings, opener: opener, focus: focusRunner, models: models, client: inference)
         summaries = SummaryCoordinator(store: store, models: models, client: inference, settings: settings)
         coordinator.summaries = summaries
@@ -82,12 +84,23 @@ final class AppServices: ObservableObject {
         AppServices.shared = self
     }
 
+    /// What a summary is told besides the transcript: the meeting's title, who was invited (from the calendar, while
+    /// the event is still in the loaded window), the person's own name, and the notes they typed for this date.
+    func summaryContext(_ occurrenceID: UUID) async -> SummaryContext {
+        guard let occ = try? await store.occurrence(occurrenceID) else { return SummaryContext() }
+        let event = calendar.item(occurrenceID: occurrenceID)?.event
+        let notes = (try? await store.document(DocumentKey(scope: .occurrence(notebookID: occ.notebookID, occurrenceID: occ.id), kind: .notes)))?.body ?? ""
+        let me = event?.currentUserName ?? (NSFullUserName().isEmpty ? nil : NSFullUserName())
+        return SummaryContext(title: event?.title ?? occ.titleSnapshot, attendees: event?.attendees ?? [], userName: me, notes: notes)
+    }
+
     func start() {
         Task {
             _ = try? await store.recoverInterruptedSessions()     // never auto-restart recording after a crash (§10.6)
             try? await store.markInterruptedActionsAmbiguous()     // crash between reserve and open → ambiguous (§11.2)
         }
         summaries.isCaptureActive = { [weak self] in self?.coordinator.isCapturing ?? false }
+        summaries.meetingContext = { [weak self] occurrenceID in await self?.summaryContext(occurrenceID) ?? SummaryContext() }
         models.isInUse = { [weak self] id in
             guard let self else { return false }
             return (self.coordinator.isCapturing && self.models.entry(.speechToText)?.id == id)

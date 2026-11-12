@@ -90,7 +90,20 @@ actor EventKitCalendarRepository: CalendarRepository {
             start: e.startDate, end: e.endDate ?? e.startDate, timeZoneID: e.timeZone?.identifier,
             originalOccurrenceDate: e.occurrenceDate, isDetached: e.isDetached, isRecurring: e.hasRecurrenceRules || e.isDetached,
             isAllDay: e.isAllDay, isCancelled: e.status == .canceled, rsvp: rsvp, url: e.url?.absoluteString,
-            location: e.location, notes: e.notes, organizer: e.organizer?.name, lastModified: e.lastModifiedDate)
+            location: e.location, notes: e.notes, organizer: e.organizer?.name, lastModified: e.lastModifiedDate,
+            attendees: attendeeNames(e), currentUserName: e.attendees?.first(where: { $0.isCurrentUser })?.name ?? (e.organizer?.isCurrentUser == true ? e.organizer?.name : nil))
+    }
+
+    /// Display names of the other invitees and the organizer; rooms and resources are left out, emails never kept.
+    static func attendeeNames(_ e: EKEvent) -> [String]? {
+        var people = (e.attendees ?? []).filter { !$0.isCurrentUser && $0.participantType == .person }
+        if let o = e.organizer, !o.isCurrentUser { people.insert(o, at: 0) }
+        var seen = Set<String>()
+        let names = people.compactMap { p -> String? in
+            guard let n = p.name?.trimmingCharacters(in: .whitespaces), !n.isEmpty, !n.contains("@"), seen.insert(n.lowercased()).inserted else { return nil }
+            return n
+        }
+        return names.isEmpty ? nil : names
     }
 }
 

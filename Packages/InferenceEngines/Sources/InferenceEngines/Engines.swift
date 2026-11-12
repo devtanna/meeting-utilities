@@ -161,7 +161,8 @@ public final class QwenEngine: @unchecked Sendable {
     /// Runs one chat completion with a bounded token budget. `isCancelled` is polled between tokens.
     public func generate(
         system: String, user: String, maxTokens: Int, maxKVSize: Int,
-        isCancelled: @escaping @Sendable () -> Bool
+        isCancelled: @escaping @Sendable () -> Bool,
+        onText: (@Sendable (String, Int) -> Void)? = nil
     ) async throws -> LLMGeneration {
         guard let container else { throw EngineError.notLoaded }
         let start = Date()
@@ -183,6 +184,8 @@ public final class QwenEngine: @unchecked Sendable {
             switch event {
             case .chunk(let s):
                 text += s
+                generated += 1
+                onText?(text, generated)
             case .info(let info):
                 generated = info.generationTokenCount
             default:

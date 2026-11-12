@@ -132,18 +132,30 @@ public struct TranscriptSegmentRecord: Sendable, Equatable, Identifiable {
     public var endOffsetMs: Int
     public var text: String
     public var committed: Bool
+    /// The other side's speaker as the call app showed them talking (Zoom, Teams, Meet); nil when it couldn't tell.
+    public var speaker: String?
 
     public init(id: UUID = UUID(), sessionID: UUID, source: String, sequence: Int, revision: Int = 1, kind: SegmentKind,
-                startOffsetMs: Int, endOffsetMs: Int, text: String, committed: Bool = true) {
+                startOffsetMs: Int, endOffsetMs: Int, text: String, committed: Bool = true, speaker: String? = nil) {
         self.id = id; self.sessionID = sessionID; self.source = source; self.sequence = sequence; self.revision = revision
         self.kind = kind; self.startOffsetMs = startOffsetMs; self.endOffsetMs = endOffsetMs; self.text = text; self.committed = committed
+        self.speaker = speaker
     }
 
     public var sourceLabel: String {
         switch source {
         case "microphone": "You"
-        case "system": "Other participants"
+        case "system": speaker ?? "Other participants"
         default: "Combined"
+        }
+    }
+
+    /// How the summary prompt names who said it: "You", the speaker's name, or "Them" for the other side unnamed.
+    public var promptSpeaker: String {
+        switch source {
+        case "microphone": "You"
+        case "system": speaker ?? "Them"
+        default: "Unknown"
         }
     }
 }

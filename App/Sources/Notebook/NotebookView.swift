@@ -243,7 +243,7 @@ struct NotebookView: View {
                     Group {
                         switch model.tab {
                         case .notes: notesTab
-                        case .transcript: ContentCard { TranscriptTab(transcript: model.transcript) }
+                        case .transcript: ContentCard { TranscriptTab(transcript: model.transcript, live: coordinator.live, occurrenceID: occ.id) }
                         case .summary: ContentCard { SummaryTab(model: model, summaries: summaries).padding(10) }
                         case .talktrack: talktrackTab
                         }
@@ -487,7 +487,12 @@ struct Badge: View {
 /// Summaries are a separate, optional step on the Summary tab.
 struct TranscriptTab: View {
     var transcript: [(session: MeetingSessionRecord, segments: [TranscriptSegmentRecord])]
+    @ObservedObject var live: LiveTranscript
+    var occurrenceID: UUID?
     @State private var copied = false
+
+    /// Words still being spoken in this meeting, shown lighter after the saved lines.
+    var liveLines: [LiveLine] { live.occurrenceID != nil && live.occurrenceID == occurrenceID ? live.ordered : [] }
 
     var speech: [TranscriptSegmentRecord] { transcript.flatMap(\.segments).filter { $0.kind != .gap } }
     /// Speaker labels only help when both the microphone and other participants were captured.
@@ -506,10 +511,10 @@ struct TranscriptTab: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
         Divider()
-        if transcript.isEmpty {
+        if transcript.isEmpty && liveLines.isEmpty {
             ContentUnavailableView("No transcript", systemImage: "waveform", description: Text("Start transcription from the agenda, a notification Join, or the button above."))
         } else {
-            SelectableText(text: attributed(), accessibilityLabel: "Transcript")
+            SelectableText(text: attributed(), accessibilityLabel: "Transcript", followsEnd: true)
         }
     }
 
@@ -553,6 +558,16 @@ struct TranscriptTab: View {
                     append(seg.text + "\n", textAttrs)
                 }
             }
+        }
+        // Live words: lighter, with no time yet; replaced by the saved line when it is final.
+        let liveAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 14), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: row]
+        for l in liveLines {
+            append("[ ··· ]\t", stampAttrs)
+            if showSources || liveLines.count > 1 {
+                append("\(l.label)  ", [.font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                                        .foregroundColor: (l.source == .microphone ? NSColor.controlAccentColor : NSColor.systemPurple).withAlphaComponent(0.6), .paragraphStyle: row])
+            }
+            append(l.text + " …\n", liveAttrs)
         }
         if out.length > 0, out.string.hasSuffix("\n") { out.deleteCharacters(in: NSRange(location: out.length - 1, length: 1)) }
         return out
@@ -638,6 +653,9 @@ struct SummaryTab: View {
             if editing {
                 Text("Edit the JSON fields directly; your edit is saved as a new version and never overwritten without asking.").font(.caption).foregroundStyle(.secondary)
                 PlainTextEditor(text: $draft, fontSize: 12, accessibilityLabel: "Summary JSON").border(.separator)
+            } else if let occID, let draft = summaries.drafts[occID], state == .generating {
+                // The summary as it is written; replaced by the saved, validated one when it finishes.
+                SummaryRenderView(summary: draft, segments: model.transcript.flatMap(\.segments), writing: true)
             } else if let s = model.summaries.first?.result {
                 SummaryRenderView(summary: s, segments: model.transcript.flatMap(\.segments))
             } else {
@@ -667,34 +685,51 @@ struct SummaryTab: View {
     }
 }
 
-/// Native rendering of the structured summary; no active content (§14.5).
+/// Native rendering of the structured summary; no active content (§14.5). Version 2 summaries read as topic sections
+/// with cited points, then decisions, next steps and open questions; version 1 keeps its discussion-point list.
 struct SummaryRenderView: View {
     var summary: SummaryV1
     var segments: [TranscriptSegmentRecord]
+    /// Still being written: shown as it arrives, with a quiet marker at the end.
+    var writing = false
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if !summary.overview.isEmpty { section("Overview") { Text(summary.overview) } }
+            VStack(alignment: .leading, spacing: 14) {
+                if !summary.overview.isEmpty {
+                    Text(summary.overview).font(.system(size: 13.5)).foregroundStyle(.primary)
+                }
+                ForEach(Array(summary.topics.enumerated()), id: \.offset) { _, t in
+                    section(t.title) {
+                        ForEach(Array(t.points.enumerated()), id: \.offset) { _, p in
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text("•").foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(p.text)
+                                    if !p.sourceSegmentIDs.isEmpty { refs(p.sourceSegmentIDs) }
+                                }
+                            }
+                        }
+                    }
+                }
                 if !summary.discussionPoints.isEmpty { section("Discussion points") { bullets(summary.discussionPoints) } }
                 if !summary.decisions.isEmpty {
                     section("Decisions") {
                         ForEach(Array(summary.decisions.enumerated()), id: \.offset) { _, d in
-                            HStack(alignment: .top) { Text("•"); VStack(alignment: .leading) { Text(d.text); refs(d.sourceSegmentIDs) } }
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Image(systemName: "checkmark.seal").foregroundStyle(.secondary).font(.system(size: 11))
+                                VStack(alignment: .leading, spacing: 1) { Text(d.text); if !d.sourceSegmentIDs.isEmpty { refs(d.sourceSegmentIDs) } }
+                            }
                         }
                     }
                 }
                 if !summary.actionItems.isEmpty {
-                    section("Action items") {
+                    section("Next steps") {
                         ForEach(Array(summary.actionItems.enumerated()), id: \.offset) { _, a in
-                            HStack(alignment: .top) {
-                                Image(systemName: "square")
-                                VStack(alignment: .leading) {
-                                    Text(a.text)
-                                    HStack {
-                                        Text("Owner: \(a.owner ?? "not stated")").foregroundStyle(a.owner == nil ? .tertiary : .secondary)
-                                        Text("Due: \(a.dueDateText ?? "not stated")").foregroundStyle(a.dueDateText == nil ? .tertiary : .secondary)
-                                    }.font(.caption)
-                                    refs(a.sourceSegmentIDs)
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Image(systemName: "square").foregroundStyle(.secondary).font(.system(size: 11))
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(nextStep(a))
+                                    if !a.sourceSegmentIDs.isEmpty { refs(a.sourceSegmentIDs) }
                                 }
                             }
                         }
@@ -704,18 +739,27 @@ struct SummaryRenderView: View {
                 if !summary.coverageWarnings.isEmpty {
                     section("Coverage") { ForEach(summary.coverageWarnings, id: \.self) { Label($0, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) } }
                 }
+                if writing {
+                    HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("Writing…").font(.caption).foregroundStyle(.secondary) }
+                }
             }
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(6)
+            .animation(.easeOut(duration: 0.25), value: summary)
         }
     }
 
+    /// "**Priya:** send the revised quote, by Friday", the name in bold.
+    func nextStep(_ a: SummaryV1.ActionItem) -> AttributedString {
+        (try? AttributedString(markdown: SummaryV1.nextStepLine(a))) ?? AttributedString(a.text)
+    }
+
     func section<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 4) { Text(title).font(.headline); c() }
+        VStack(alignment: .leading, spacing: 5) { Text(title).font(.headline); c() }
     }
     func bullets(_ items: [String]) -> some View {
-        ForEach(items, id: \.self) { t in HStack(alignment: .top) { Text("•"); Text(t) } }
+        ForEach(items, id: \.self) { t in HStack(alignment: .firstTextBaseline, spacing: 6) { Text("•").foregroundStyle(.secondary); Text(t) } }
     }
     func refs(_ ids: [String]) -> some View {
         let lookup = Dictionary(uniqueKeysWithValues: segments.enumerated().map { ("S\($0.offset + 1)", $0.element) })

@@ -47,6 +47,7 @@ covered by the notices inside those packages.
 | Project | Revision | License | What was adapted |
 |---|---|---|---|
 | Meetily (Zackriya Solutions) | 07c4dfd | MIT, Copyright (c) 2024 Zackriya Solutions | The capture pipeline was ported to Swift from its Rust sources (`audio/capture/core_audio.rs`, `audio/pipeline.rs`, `audio/audio_processing.rs`, `audio/vad.rs`): the mono global process tap in a private aggregate clocked by the output device, first-two-channel microphone downmix, 80 Hz high-pass, EBU R128 loudness normalization to -23 LUFS with a 10 ms look-ahead limiter, and the Silero VAD thresholds and timing. See `Packages/MeetingKit/Sources/MeetingAudio/MicProcessing.swift`, `SileroVAD.swift` and `Sources.swift`. |
+| Yogurt (Frigade) | ab8fb17 | MIT, Copyright (c) 2026 Frigade | Ported to Swift from its TypeScript and Swift sources: reading Zoom, Teams and Google Meet call windows through Accessibility and naming the other side's lines (`app/native/yogurt-mac/main.swift` call-watch, `app/src/main/callNames/parse.ts`, `attribute.ts`); echo detection from loudness envelopes and word overlap (`app/src/main/asr/echoDetect.ts`, `echo.ts`); and the writing rules for topic-based meeting notes (`app/src/main/notes/enhance.ts`). See `Packages/MeetingKit/Sources/MeetingCore/CallNames.swift`, `Packages/MeetingKit/Sources/MeetingAudio/Echo.swift`, `App/Sources/Session/CallWatcher.swift` and `Packages/MeetingKit/Sources/MeetingCore/Summary.swift`. |
 
 ## Models shipped in the app
 

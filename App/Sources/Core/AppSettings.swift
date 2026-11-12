@@ -58,6 +58,8 @@ final class AppSettings: ObservableObject {
     @Published var systemAudioTested: Bool { didSet { d.set(systemAudioTested, forKey: "systemAudioTested") } }
     @Published var voiceProcessing: Bool { didSet { d.set(voiceProcessing, forKey: "voiceProcessing") } }
     @Published var deferSummariesOnLowPower: Bool { didSet { d.set(deferSummariesOnLowPower, forKey: "deferSummariesOnLowPower") } }
+    /// Name the other side's lines after who Zoom, Teams or Meet shows talking (needs Accessibility access).
+    @Published var nameSpeakersFromCalls: Bool { didSet { d.set(nameSpeakersFromCalls, forKey: "nameSpeakersFromCalls") } }
 
     @Published var talktrackFontSize: Double { didSet { d.set(talktrackFontSize, forKey: "talktrackFontSize") } }
     @Published var talktrackLineSpacing: Double { didSet { d.set(talktrackLineSpacing, forKey: "talktrackLineSpacing") } }
@@ -115,6 +117,7 @@ final class AppSettings: ObservableObject {
         systemAudioTested = d.bool(forKey: "systemAudioTested")
         voiceProcessing = d.bool(forKey: "voiceProcessing")
         deferSummariesOnLowPower = d.object(forKey: "deferSummariesOnLowPower") as? Bool ?? true
+        nameSpeakersFromCalls = d.object(forKey: "nameSpeakersFromCalls") as? Bool ?? true
         talktrackFontSize = d.object(forKey: "talktrackFontSize") as? Double ?? 24
         talktrackLineSpacing = d.object(forKey: "talktrackLineSpacing") as? Double ?? 6
         talktrackSpeed = d.object(forKey: "talktrackSpeed") as? Double ?? 24

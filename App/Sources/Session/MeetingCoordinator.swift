@@ -34,6 +34,26 @@ final class LevelMeters: ObservableObject {
     @Published var levels: [CaptureSource: Float] = [:]
 }
 
+/// Words still being spoken on one source: a quick reading of the speech in progress, replaced as it grows and
+/// removed when the final line for it is saved. Never saved.
+struct LiveLine: Equatable {
+    var source: CaptureSource
+    var text: String
+    var speaker: String?
+    /// Capture host time the speech began.
+    var start: Double
+    var label: String { source == .microphone ? "You" : speaker ?? "Other participants" }
+}
+
+/// Live words for the running session, kept apart from `ActiveSessionState` so their updates redraw only the transcript.
+@MainActor
+final class LiveTranscript: ObservableObject {
+    @Published var lines: [CaptureSource: LiveLine] = [:]
+    @Published var occurrenceID: UUID?
+    /// Mic and system lines in the order they began.
+    var ordered: [LiveLine] { lines.values.sorted { $0.start < $1.start } }
+}
+
 struct StartFailureState: Equatable {
     var occurrenceID: UUID
     var failedSource: CaptureSource?
@@ -66,6 +86,9 @@ final class MeetingCoordinator: ObservableObject {
 
     private let capture = CaptureController()
     let meters = LevelMeters()
+    let live = LiveTranscript()
+    /// Reads who is talking from Zoom, Teams or Meet while capturing, to name the other side's lines.
+    let callWatcher = CallWatcher()
     private var pumpTask: Task<Void, Never>?
     private var promptTimer: Timer?
     private var deadlineTimer: Timer?
@@ -219,7 +242,11 @@ final class MeetingCoordinator: ObservableObject {
             models.setInUse(.speechToText, true)
             _ = try await client.load(kind: .speech, modelID: speech.id, revision: speech.artifactRevision, directory: dir)
             guard gen == generation else { return }
-            let stream = try capture.start(CaptureConfiguration(sessionID: record.id, sources: sources, microphoneDeviceUID: settings.microphoneUID))
+            let stream = try capture.start(CaptureConfiguration(sessionID: record.id, sources: sources, microphoneDeviceUID: settings.microphoneUID, livePartials: true))
+            if settings.nameSpeakersFromCalls, sources.contains(.system), CallWatcher.isTrusted {
+                let me = calendar.item(occurrenceID: occurrenceID)?.event.currentUserName
+                callWatcher.start(myNames: [NSFullUserName(), me ?? ""])
+            }
             try await store.transition(sessionID: record.id, to: .capturing)
             update { $0.capture = .capturing; $0.transcription = .processingChunks; $0.startedAt = Date(); $0.message = nil }
             Log.capture.info("capture running session=\(record.id, privacy: .public)")
@@ -234,6 +261,7 @@ final class MeetingCoordinator: ObservableObject {
 
     private func failStart(_ sessionID: UUID, _ occurrenceID: UUID, source: CaptureSource?, reason: String, offerSingle: Bool) async {
         capture.stop()
+        callWatcher.stop()
         try? await store.transition(sessionID: sessionID, to: .failed, reason: .sourceLost)
         models.setInUse(.speechToText, false)
         active = nil
@@ -315,11 +343,14 @@ final class MeetingCoordinator: ObservableObject {
         capture.stop()                         // flushes in-progress speech into the stream, then finishes it
         if !interrupted { await pumpTask?.value } else { pumpTask?.cancel(); await client.cancel(jobID: nil, sessionID: a.sessionID) }
         pumpTask = nil
+        callWatcher.stop()
+        live.lines = [:]; live.occurrenceID = nil
         await saveDiagnostics(sessionID: a.sessionID)
         try? await store.transition(sessionID: a.sessionID, to: interrupted ? .interrupted : .stopped, reason: reason)
         if interrupted { try? await store.transition(sessionID: a.sessionID, to: .stopped, reason: reason) }
         models.setInUse(.speechToText, false)
-        await client.unloadModels()
+        // Release the speech model unless the user chose to keep it loaded in Settings → Models.
+        if client.keptModel != .speech { await client.unloadModels() }
         let final = active
         active = nil
         if interrupted { resumable = (a.occurrenceID, a.title) }
@@ -386,7 +417,7 @@ final class MeetingCoordinator: ObservableObject {
 
     // MARK: - Transcription pump
 
-    struct RecognitionCounts: Codable { var sent = 0, recognized = 0, empty = 0, failed = 0 }
+    struct RecognitionCounts: Codable { var sent = 0, recognized = 0, empty = 0, failed = 0, echo = 0, named = 0 }
 
     /// What each source delivered and what the recognizer made of it (§21 diagnostics; no audio or text).
     struct SessionDiagnostics: Codable {
@@ -401,6 +432,10 @@ final class MeetingCoordinator: ObservableObject {
             var recognized: Int
             var empty: Int
             var failed: Int
+            /// Microphone lines dropped as a copy of the other side's voice from the speakers.
+            var echoDropped: Int?
+            /// Lines from the other side named after the call app's speaker.
+            var named: Int?
         }
     }
 
@@ -411,26 +446,105 @@ final class MeetingCoordinator: ObservableObject {
             let r = recognition[source] ?? RecognitionCounts()
             entries[source.rawValue] = .init(device: s.device, audioSeconds: (s.audioSeconds * 10).rounded() / 10, peakDB: (s.peakDB * 10).rounded() / 10,
                                              utterances: s.utterances, restarts: s.restarts, stalls: s.stalls,
-                                             recognized: r.recognized, empty: r.empty, failed: r.failed)
-            Log.capture.info("session \(source.rawValue, privacy: .public) sent=\(r.sent, privacy: .public) recognized=\(r.recognized, privacy: .public) empty=\(r.empty, privacy: .public) failed=\(r.failed, privacy: .public)")
+                                             recognized: r.recognized, empty: r.empty, failed: r.failed, echoDropped: r.echo, named: r.named)
+            Log.capture.info("session \(source.rawValue, privacy: .public) sent=\(r.sent, privacy: .public) recognized=\(r.recognized, privacy: .public) empty=\(r.empty, privacy: .public) failed=\(r.failed, privacy: .public) echo=\(r.echo, privacy: .public) named=\(r.named, privacy: .public)")
         }
         guard let data = try? JSONEncoder().encode(SessionDiagnostics(sources: entries)), let json = String(data: data, encoding: .utf8) else { return }
         try? await store.setCoverage(sessionID: sessionID, json: json)
     }
 
     private struct Pending { var source: CaptureSource; var utterance: Utterance; var bytes: Int }
+    /// A microphone line waiting briefly before it is saved, so the other side's line for the same moment can arrive
+    /// first and an echo of it can be dropped.
+    private struct Held { var segment: TranscriptSegmentRecord; var start: Double; var end: Double; var readyAt: Double }
+    static let echoHoldSeconds = 2.0
+    /// If their side is still being transcribed over a held line's time, it waits up to this much longer.
+    static let echoExtraWaitSeconds = 6.0
 
     private func runPump(stream: AsyncStream<CaptureEvent>, sessionID: UUID, occurrenceID: UUID, notebookID: UUID, generation gen: Int) {
         let origin = capture.originHostTime
         let budget = capture.budget
         let store = self.store, client = self.client
+        let echo = capture.echo, watcher = callWatcher
+        // Echo can only be judged with both sides captured.
+        let checkEcho = Set(active?.sources ?? []) == Set(CaptureSource.allCases)
+        // Live readings use their own session ID, so their sequence numbers never collide with saved chunks'.
+        let partialSessionID = UUID()
+        live.occurrenceID = occurrenceID
         pumpTask = Task { [weak self] in
             var queues: [CaptureSource: [Pending]] = [:]
             var inFlight: [CaptureSource: Task<Void, Never>] = [:]
+            var inFlightStart: [CaptureSource: Double] = [:]
             var sequence: [CaptureSource: Int] = [:]
             var lastText: [CaptureSource: (text: String, end: Double, forced: Bool)] = [:]
             var lastLevel: [CaptureSource: Date] = [:]
             let maxBacklogSeconds = 60.0
+            var held: [Held] = []
+            var theirs: [EchoText.Line] = []
+            var partialInFlight: [CaptureSource: Task<Void, Never>] = [:]
+            var partialSequence: [CaptureSource: Int] = [:]
+            var nextPartialAt: [CaptureSource: Double] = [:]
+            /// Start of the newest finished chunk per source: a live reading of speech that has since finished is stale.
+            var lastFinalStart: [CaptureSource: Double] = [:]
+
+            @MainActor func clearLive(_ source: CaptureSource, through end: Double) {
+                if let l = self?.live.lines[source], l.start <= end { self?.live.lines[source] = nil }
+            }
+
+            @MainActor func commitSpeech(_ s: TranscriptSegmentRecord, _ source: CaptureSource, start: Double, end: Double) async {
+                if (try? await store.commitSegment(s, occurrenceID: occurrenceID, notebookID: notebookID)) == true {
+                    self?.update { $0.segmentCount += 1; $0.lagSeconds = max(0, HostTime.now() - end) }
+                    if s.speaker != nil { self?.recognition[source, default: .init()].named += 1 }
+                }
+                clearLive(source, through: end)
+            }
+
+            /// Saves held microphone lines once their wait is over, dropping the ones that are the other side's voice
+            /// picked up from the speakers. `final`: the session is ending and everything is in.
+            @MainActor func releaseHeld(final: Bool) async {
+                while let h = held.first {
+                    let now = HostTime.now()
+                    if !final {
+                        if now < h.readyAt { return }
+                        let theirsPending = (inFlightStart[.system].map { $0 < h.end } ?? false)
+                            || (queues[.system]?.contains { $0.utterance.startHostTime < h.end } ?? false)
+                        if theirsPending && now < h.readyAt + Self.echoExtraWaitSeconds { return }
+                    }
+                    held.removeFirst()
+                    if echo.echoPresent,
+                       EchoText.isEcho(mic: .init(start: h.start, end: h.end, text: h.segment.text), theirs: theirs,
+                                       moment: echo.moment(start: h.start, end: h.end), correlatedAt: echo.correlatedAt((h.start + h.end) / 2)) {
+                        self?.recognition[.microphone, default: .init()].echo += 1
+                        clearLive(.microphone, through: h.end)
+                        continue
+                    }
+                    await commitSpeech(h.segment, .microphone, start: h.start, end: h.end)
+                }
+            }
+
+            /// A quick reading of speech still in progress, shown as live words and never saved. Only when this source
+            /// has nothing waiting, and less often on a Mac where readings are slow.
+            @MainActor func readPartial(_ source: CaptureSource, _ u: Utterance) {
+                guard partialInFlight[source] == nil, inFlight[source] == nil, queues[source]?.isEmpty ?? true,
+                      u.startHostTime > (lastFinalStart[source] ?? 0), HostTime.now() >= (nextPartialAt[source] ?? 0) else { return }
+                // Without headphones the mic's live words would show the other side's voice as "You".
+                if source == .microphone && checkEcho && echo.echoPresent { return }
+                let seq = (partialSequence[source] ?? 0) + 1; partialSequence[source] = seq
+                let header = ChunkHeader(sessionID: partialSessionID, jobID: partialSessionID, generation: gen, sequence: seq,
+                                         source: source == .microphone ? .microphone : .system, sampleRate: 16_000, frameCount: u.samples.count,
+                                         hostTimeStartSeconds: u.startHostTime, hostTimeEndSeconds: u.endHostTime)
+                partialInFlight[source] = Task { @MainActor in
+                    defer { partialInFlight[source] = nil }
+                    let began = HostTime.now()
+                    guard let r = try? await client.transcribe(header: header, samples: u.samples), r.ok, r.sessionID == partialSessionID else { return }
+                    nextPartialAt[source] = HostTime.now() + (HostTime.now() - began)
+                    guard self?.generation == gen, self?.active?.capture == .capturing, u.startHostTime > (lastFinalStart[source] ?? 0) else { return }
+                    let text = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { return }
+                    let speaker = source == .system ? watcher.name(start: u.startHostTime, end: u.endHostTime) : nil
+                    self?.live.lines[source] = LiveLine(source: source, text: text, speaker: speaker, start: u.startHostTime)
+                }
+            }
 
             @MainActor func commitGap(_ source: CaptureSource, start: Double, end: Double) async {
                 let seq = (sequence[source] ?? 0) + 1; sequence[source] = seq
@@ -452,9 +566,10 @@ final class MeetingCoordinator: ObservableObject {
                     return try await client.transcribe(header: header, samples: u.samples)
                 }
                 let firstSequence = nextSequence()
+                inFlightStart[source] = u.startHostTime
                 inFlight[source] = Task { @MainActor in
                     var seq = firstSequence
-                    defer { inFlight[source] = nil; budget.set("inflight-\(source.rawValue)", bytes: 0); dispatch(source) }
+                    defer { inFlight[source] = nil; inFlightStart[source] = nil; budget.set("inflight-\(source.rawValue)", bytes: 0); dispatch(source) }
                     let startMs = max(0, Int((u.startHostTime - origin) * 1000)), endMs = max(startMs, Int((u.endHostTime - origin) * 1000))
                     self?.recognition[source, default: .init()].sent += 1
                     do {
@@ -485,12 +600,22 @@ final class MeetingCoordinator: ObservableObject {
                         var text = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
                         if let prev = lastText[source], prev.forced, u.startHostTime < prev.end { text = OverlapDedupe.trimLeadingOverlap(previous: prev.text, next: text) }
                         lastText[source] = (r.text, u.endHostTime, u.forcedSplit)
-                        guard !text.isEmpty else { self?.recognition[source, default: .init()].empty += 1; return }
+                        guard !text.isEmpty else { self?.recognition[source, default: .init()].empty += 1; clearLive(source, through: u.endHostTime); return }
                         self?.recognition[source, default: .init()].recognized += 1
-                        let s = TranscriptSegmentRecord(sessionID: sessionID, source: source.rawValue, sequence: seq, kind: .speech, startOffsetMs: startMs, endOffsetMs: endMs, text: text)
-                        if (try? await store.commitSegment(s, occurrenceID: occurrenceID, notebookID: notebookID)) == true {
-                            self?.update { $0.segmentCount += 1; $0.lagSeconds = max(0, HostTime.now() - u.endHostTime) }
+                        // The other side's speaker, as the call app showed them talking over this line.
+                        let speaker = source == .system ? watcher.name(start: u.startHostTime, end: u.endHostTime) : nil
+                        let s = TranscriptSegmentRecord(sessionID: sessionID, source: source.rawValue, sequence: seq, kind: .speech, startOffsetMs: startMs,
+                                                        endOffsetMs: endMs, text: text, speaker: speaker)
+                        if checkEcho && source == .microphone {
+                            held.append(Held(segment: s, start: u.startHostTime, end: u.endHostTime, readyAt: HostTime.now() + Self.echoHoldSeconds))
+                        } else {
+                            if source == .system {
+                                theirs.append(.init(start: u.startHostTime, end: u.endHostTime, text: text))
+                                if let cut = theirs.firstIndex(where: { $0.end > u.endHostTime - 120 }), cut > 0 { theirs.removeFirst(cut) }
+                            }
+                            await commitSpeech(s, source, start: u.startHostTime, end: u.endHostTime)
                         }
+                        await releaseHeld(final: false)
                     } catch {
                         self?.recognition[source, default: .init()].failed += 1
                         Log.capture.error("transcribe threw source=\(source.rawValue, privacy: .public) error=\(String(describing: error), privacy: .public)")
@@ -515,7 +640,10 @@ final class MeetingCoordinator: ObservableObject {
 
             for await event in stream {
                 switch event {
+                case .partial(let source, let u):
+                    readPartial(source, u)
                 case .utterance(let source, let u):
+                    lastFinalStart[source] = u.startHostTime
                     let bytes = u.samples.count * 4
                     queues[source, default: []].append(Pending(source: source, utterance: u, bytes: bytes))
                     // Bounded backlog: per-source seconds and the global 32 MiB budget; drop oldest with a gap marker (§13.5).
@@ -543,6 +671,8 @@ final class MeetingCoordinator: ObservableObject {
                 case .sourceRestarted(let source):
                     self?.update { $0.message = "\(source == .microphone ? "Microphone" : "System audio") restarted after a device change; capture continued." }
                 }
+                // Level events arrive ~10 times a second per source, so held mic lines are looked at often enough.
+                if !held.isEmpty { await releaseHeld(final: false) }
             }
             // Drain: wait for in-flight chunks, then process what is queued (captured audio only).
             for source in CaptureSource.allCases {
@@ -552,6 +682,9 @@ final class MeetingCoordinator: ObservableObject {
                     dispatch(source)
                 }
             }
+            // Everything from both sides is in: judge and save the microphone lines still held.
+            await releaseHeld(final: true)
+            for t in partialInFlight.values { await t.value }
             budget.set("queue-microphone", bytes: 0); budget.set("queue-system", bytes: 0)
             self?.update { $0.transcription = ($0.gapCount > 0) ? .partial : .complete }
         }

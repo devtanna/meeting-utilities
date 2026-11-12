@@ -56,7 +56,7 @@ enum SnapshotRenderer {
                          "Perfect. Then let's spend the rest of the time on planning for next week.", "Sounds good."]
             for (i, text) in lines.enumerated() {
                 let seg = TranscriptSegmentRecord(sessionID: session.id, source: i % 2 == 0 ? "microphone" : "system", sequence: i, kind: .speech,
-                                                  startOffsetMs: i * 6_500, endOffsetMs: i * 6_500 + 6_000, text: text)
+                                                  startOffsetMs: i * 6_500, endOffsetMs: i * 6_500 + 6_000, text: text, speaker: i % 2 == 0 ? nil : "Sam")
                 _ = try? await store.commitSegment(seg, occurrenceID: r.occurrence.id, notebookID: r.notebook.id)
             }
             try? await store.transition(sessionID: session.id, to: .stopping, reason: .user)
@@ -73,10 +73,14 @@ enum SnapshotRenderer {
         render(NotebookView(model: nb, coordinator: services.coordinator, summaries: services.summaries), size: NSSize(width: 980, height: 700), appearance: .darkAqua, to: out.appendingPathComponent("notebook-transcript-dark.png"))
 
         // Sample summary for the same meeting.
-        if ((try? await store.summaries(occurrenceID: r.occurrence.id)) ?? []).isEmpty {
+        if ((try? await store.summaries(occurrenceID: r.occurrence.id)) ?? []).first?.result.topics.isEmpty ?? true {
             var s = SummaryV1()
-            s.overview = "A short check-in after yesterday's release. The rollout is healthy and the two support tickets about the settings page are already fixed in the next build. The rest of the meeting was planning for next week."
-            s.discussionPoints = ["Release rollout status", "Support tickets about the settings page", "Planning for next week"]
+            s.overview = "A check-in after yesterday's release: the rollout is healthy and both settings-page tickets are fixed for the next build."
+            s.topics = [
+                .init(title: "Release rollout", points: [.init(text: "Release went out yesterday; rollout looks healthy so far.", sourceSegmentIDs: ["S2"])]),
+                .init(title: "Settings page support tickets", points: [.init(text: "Two tickets about the settings page, both already fixed in the next build.", sourceSegmentIDs: ["S4"])]),
+                .init(title: "Planning for next week", points: [.init(text: "Rest of the time goes to next week's plan.", sourceSegmentIDs: ["S5"])]),
+            ]
             s.decisions = [.init(text: "Ship the settings fixes with the next build.", sourceSegmentIDs: [])]
             s.actionItems = [.init(text: "Send the release notes to the team", owner: "You", dueDateText: "Friday", sourceSegmentIDs: []),
                              .init(text: "Draft next week's plan", owner: "Sam", dueDateText: nil, sourceSegmentIDs: [])]

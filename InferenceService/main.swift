@@ -18,6 +18,8 @@ final class ServiceState: @unchecked Sendable {
     var speechModel: (id: String, revision: String)?
     var summaryModel: (id: String, revision: String)?
     var cancelledJobs = Set<UUID>()
+    /// Text written so far by the running generation, readable without waiting for the serial queue.
+    var progress: [UUID: (text: String, tokens: Int)] = [:]
     var cancelledSessions = Set<UUID>()
     var lastSequence: [String: Int] = [:]      // "\(session)|\(source)" -> highest accepted sequence
     var idleWork: DispatchWorkItem?
@@ -164,14 +166,20 @@ final class InferenceServiceHandler: NSObject, InferenceServiceXPC {
             let sem = DispatchSemaphore(value: 0)
             let box = GenBox()
             let jobID = req.jobID
+            state.lock.withLock { state.progress = [jobID: ("", 0)] }
             Task.detached {
                 do {
                     box.value = .success(try await state.summary.generate(system: req.system, user: req.user, maxTokens: req.maxTokens, maxKVSize: req.maxKVSize,
-                                                                          isCancelled: { state.isCancelled(job: jobID) }))
+                                                                          isCancelled: { state.isCancelled(job: jobID) },
+                                                                          onText: { text, tokens in
+                                                                              let capped = text.count > InferenceProtocolVersion.maxTextBytes / 2 ? String(text.prefix(InferenceProtocolVersion.maxTextBytes / 2)) : text
+                                                                              state.lock.withLock { state.progress[jobID] = (capped, tokens) }
+                                                                          }))
                 } catch { box.value = .failure(error) }
                 sem.signal()
             }
             sem.wait()
+            state.lock.withLock { _ = state.progress.removeValue(forKey: jobID) }
             state.touch()
             switch box.value! {
             case .success(let g):
@@ -182,6 +190,13 @@ final class InferenceServiceHandler: NSObject, InferenceServiceXPC {
                 reply(Wire.encode(GenerateResult(jobID: req.jobID, ok: false, errorCode: code, text: "", promptTokens: 0, generatedTokens: 0, elapsedSeconds: 0)))
             }
         }
+    }
+
+    /// Answered off the serial queue (which is busy generating), from the lock-protected progress map.
+    func generationProgress(_ request: Data, reply: @escaping @Sendable (Data) -> Void) {
+        guard let req = Wire.decode(GenerationProgressRequest.self, request) else { reply(Wire.encode(SimpleResponse(ok: false, errorCode: "bad_request"))); return }
+        let p = state.lock.withLock { state.progress[req.jobID] }
+        reply(Wire.encode(GenerationProgress(jobID: req.jobID, running: p != nil, text: p?.text ?? "", generatedTokens: p?.tokens ?? 0)))
     }
 
     func cancel(_ request: Data, reply: @escaping @Sendable (Data) -> Void) {

@@ -86,6 +86,13 @@ public struct SileroChunker: @unchecked Sendable {
 
     public var bufferedSamples: Int { pending.count + preRoll.count + current.count }
 
+    /// The speech still being spoken (not yet ended by a pause), for a quick live reading; nil outside speech or
+    /// before `minimumSeconds` of it.
+    public func openSpeech(minimumSeconds: Double) -> Utterance? {
+        guard inSpeech, Double(current.count) / rate >= minimumSeconds else { return nil }
+        return Utterance(samples: current, startHostTime: currentStart, endHostTime: currentStart + Double(current.count) / rate, forcedSplit: false)
+    }
+
     public mutating func append(_ samples: [Float], hostTime: Double) -> [Utterance] {
         if pending.isEmpty { pendingStart = hostTime }
         pending.append(contentsOf: samples)
@@ -173,6 +180,12 @@ public enum SpeechChunker: @unchecked Sendable {
     }
 
     public var isNeural: Bool { if case .silero = self { true } else { false } }
+
+    /// The speech in progress (Silero only; the energy fallback gives no live readings).
+    public func openSpeech(minimumSeconds: Double) -> Utterance? {
+        if case .silero(let c) = self { return c.openSpeech(minimumSeconds: minimumSeconds) }
+        return nil
+    }
 
     public var bufferedSamples: Int {
         switch self { case .silero(let c): c.bufferedSamples; case .energy(let c): c.bufferedSamples }

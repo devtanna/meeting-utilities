@@ -5,6 +5,8 @@ import MeetingCore
 
 public enum CaptureEvent: Sendable {
     case utterance(CaptureSource, Utterance)
+    /// The speech still being spoken on a source, every `partialInterval` while someone talks: for live words only.
+    case partial(CaptureSource, Utterance)
     case level(CaptureSource, Float)
     case sourceDropped(CaptureSource, droppedSeconds: Double, at: Double)
     case sourceFailed(CaptureSource, CaptureSourceError)
@@ -22,8 +24,11 @@ public struct CaptureConfiguration: Sendable {
     public var sources: [CaptureSource]
     public var microphoneDeviceUID: String?
     public var speech: SpeechParameters
-    public init(sessionID: UUID, sources: [CaptureSource], microphoneDeviceUID: String?, speech: SpeechParameters = SpeechParameters()) {
+    /// Emit `.partial` events of speech in progress, for live words.
+    public var livePartials: Bool
+    public init(sessionID: UUID, sources: [CaptureSource], microphoneDeviceUID: String?, speech: SpeechParameters = SpeechParameters(), livePartials: Bool = false) {
         self.sessionID = sessionID; self.sources = sources; self.microphoneDeviceUID = microphoneDeviceUID; self.speech = speech
+        self.livePartials = livePartials
     }
 }
 
@@ -52,7 +57,12 @@ public final class CaptureController: @unchecked Sendable {
         var lastDropped = 0
         var lastDataAt: Double
         var stats = SourceStats()
+        /// End of the speech covered by the last live reading.
+        var lastPartialEnd: Double = 0
     }
+
+    /// How often speech in progress is offered for a live reading, and how much of it is needed first.
+    public static let partialInterval = 0.8
 
     /// A running source that delivers nothing for this long is rebuilt.
     static let stallSeconds = 3.0
@@ -67,6 +77,8 @@ public final class CaptureController: @unchecked Sendable {
     private var deviceObservers: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     public let budget: AudioBudget
     public private(set) var originHostTime: Double = 0
+    /// Loudness envelopes of both tracks, to tell whether the other side's voice reaches the microphone.
+    public let echo = EchoMonitor()
 
     public init(budget: AudioBudget = AudioBudget()) { self.budget = budget }
 
@@ -97,6 +109,7 @@ public final class CaptureController: @unchecked Sendable {
             continuation = cont
             configuration = config
             originHostTime = HostTime.now()
+            echo.reset(origin: originHostTime)
             let t = DispatchSource.makeTimerSource(queue: queue)
             t.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100), leeway: .milliseconds(20))
             t.setEventHandler { [weak self] in self?.tick() }
@@ -184,9 +197,17 @@ public final class CaptureController: @unchecked Sendable {
         p.enhancer?.process(&raw)
         let converted = p.resampler.process(raw)
         continuation?.yield(.level(source, Downmix.rmsDBFS(converted[...])))
-        for u in p.chunker.append(converted, hostTime: t - p.resampler.latencySeconds) {
+        let start = t - p.resampler.latencySeconds
+        echo.append(source, samples: converted, hostTime: start)
+        for u in p.chunker.append(converted, hostTime: start) {
             p.stats.utterances += 1
+            p.lastPartialEnd = u.endHostTime
             continuation?.yield(.utterance(source, u))
+        }
+        if configuration?.livePartials == true, let open = p.chunker.openSpeech(minimumSeconds: Self.partialInterval),
+           open.endHostTime - max(p.lastPartialEnd, open.startHostTime) >= Self.partialInterval {
+            p.lastPartialEnd = open.endHostTime
+            continuation?.yield(.partial(source, open))
         }
     }
 
