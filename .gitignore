@@ -7,7 +7,7 @@ dist/
 *.xcodeproj/
 xcuserdata/
 Config/Identity.xcconfig
-Models/
+/Models/
 *.safetensors
 *.dmg
 
