@@ -123,16 +123,18 @@ public enum CompactStatusContent: String, Sendable, Codable, CaseIterable {
 }
 
 public enum CountdownFormatter {
-    /// Countdown: minutes up to an hour away, whole hours beyond, e.g. "in 54m", "in 60m", "in 2h", "now", "12m left".
+    /// Countdown: seconds in the final minute, minutes up to an hour away, whole hours beyond,
+    /// e.g. "in 2h", "in 54m", "in 2m", "in 60s", "in 1s", "now", "12m left".
     public static func phrase(for item: AgendaItem, now: Date) -> String {
         let e = item.event
         if e.isActive(at: now) {
             let left = Int(ceil(e.end.timeIntervalSince(now) / 60))
             return left <= 0 ? "ending" : "\(format(minutes: left)) left"
         }
-        let mins = Int(ceil(e.start.timeIntervalSince(now) / 60))
-        if mins <= 0 { return "now" }
-        return "in \(format(minutes: mins))"
+        let secs = e.start.timeIntervalSince(now)
+        if secs <= 0 { return "now" }
+        if secs <= 60 { return "in \(Int(ceil(secs)))s" }
+        return "in \(format(minutes: Int(ceil(secs / 60))))"
     }
 
     /// Minutes only within the last hour ("45m", "60m"); beyond that whole hours, rounded down ("2h" for 2h 37m).
@@ -157,13 +159,21 @@ public enum CountdownFormatter {
         return "\(title) • \(sinceStart >= 0 && sinceStart < 60 ? "now" : phrase(for: item, now: now))"
     }
 
-    /// Next instant at which the minute-level status string may change. Used to schedule a single timer
-    /// instead of polling every second (§11.1, §21.2 wakeups).
+    /// Next instant at which the status string may change. Used to schedule a single timer instead of polling
+    /// every second (§11.1, §21.2 wakeups); only the final minute before a start ticks once per second.
     public static func nextRefresh(after now: Date, items: [AgendaItem]) -> Date {
         let nextMinute = Date(timeIntervalSince1970: (floor(now.timeIntervalSince1970 / 60) + 1) * 60)
         var candidate = nextMinute
         for i in items {
-            for t in [i.event.start, i.event.start.addingTimeInterval(60), i.event.end] where t > now && t < candidate { candidate = t }
+            let start = i.event.start
+            for t in [start.addingTimeInterval(-60), start, start.addingTimeInterval(60), i.event.end] where t > now && t < candidate { candidate = t }
+            // Seconds countdown: the shown value changes each time the remaining time crosses a whole second.
+            let d = start.timeIntervalSince(now)
+            if d > 0, d <= 60 {
+                let step = d - floor(d)
+                let t = now.addingTimeInterval(step > 0 ? step : 1)
+                if t < candidate { candidate = t }
+            }
         }
         return candidate
     }

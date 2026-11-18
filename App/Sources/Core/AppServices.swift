@@ -140,14 +140,15 @@ final class AppServices: ObservableObject {
         !coordinator.isCapturing && !EditorRegistry.shared.hasUnsavedEdits && summaries.states.values.allSatisfy { $0 != .generating && $0 != .loadingModel }
     }
 
-    /// Minute-level clock for countdowns: one timer at the next minute boundary or event start/end; never 1 Hz (§21.2).
+    /// Clock for countdowns: one timer at the next minute boundary or event start/end; 1 Hz only during the final
+    /// minute before a meeting, when the menu bar counts down in seconds (§21.2).
     private func scheduleClock() {
         clockTimer?.invalidate()
-        let next = CountdownFormatter.nextRefresh(after: Date(), items: calendar.plannerItems)
-        clockTimer = Timer.scheduledTimer(withTimeInterval: max(1, next.timeIntervalSinceNow + 0.05), repeats: false) { [weak self] _ in
+        let interval = CountdownFormatter.nextRefresh(after: Date(), items: calendar.plannerItems).timeIntervalSinceNow + 0.05
+        clockTimer = Timer.scheduledTimer(withTimeInterval: max(0.1, interval), repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
-        clockTimer?.tolerance = 2
+        clockTimer?.tolerance = interval <= 1.1 ? 0.05 : 2
     }
 
     func tick() {

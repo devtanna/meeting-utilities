@@ -430,7 +430,16 @@ struct AgendaTests {
 
     @Test func statusSaysNowForTheFirstMinute() {
         let m = item("Sync", "2026-11-05 10:00", "2026-11-05 10:30")
-        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 09:59").addingTimeInterval(30), length: .medium) == "Sync • in 1m")
+        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 09:58").addingTimeInterval(30), length: .medium) == "Sync • in 2m")
+        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 09:58").addingTimeInterval(59), length: .medium) == "Sync • in 2m")
+        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 09:59"), length: .medium) == "Sync • in 60s")
+        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 09:59").addingTimeInterval(0.5), length: .medium) == "Sync • in 60s")
+        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 09:59").addingTimeInterval(1), length: .medium) == "Sync • in 59s")
+        #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 09:59").addingTimeInterval(59.5), length: .medium) == "Sync • in 1s")
+        // Ticks every second during the final minute only.
+        #expect(CountdownFormatter.nextRefresh(after: date("2026-11-05 09:58").addingTimeInterval(30), items: [m]) == date("2026-11-05 09:59"))
+        #expect(CountdownFormatter.nextRefresh(after: date("2026-11-05 09:59"), items: [m]) == date("2026-11-05 09:59").addingTimeInterval(1))
+        #expect(CountdownFormatter.nextRefresh(after: date("2026-11-05 09:59").addingTimeInterval(10.25), items: [m]) == date("2026-11-05 09:59").addingTimeInterval(11))
         #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 10:00"), length: .medium) == "Sync • now")
         #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 10:00").addingTimeInterval(59), length: .medium) == "Sync • now")
         #expect(CountdownFormatter.statusTitle(item: m, now: date("2026-11-05 10:01"), length: .medium) == "Sync • 29m left")
